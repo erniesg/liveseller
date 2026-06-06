@@ -1,3 +1,5 @@
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import {
   type LanguageCode,
   type RuntimeEvent,
@@ -20,7 +22,7 @@ import {
   routeRuntimeEvent
 } from "../src/runtime";
 import { createRuntimeSessionStore } from "../src/sessionStore";
-import { createRealtimeClientSecret, createRuntimeServer } from "../src/server";
+import { createRealtimeClientSecret, createRuntimeServer, startOverlayStreamSmoke } from "../src/server";
 
 function viewerEvent(text: string, language?: LanguageCode): RuntimeEvent {
   return {
@@ -791,5 +793,43 @@ describe("live brain policy runtime", () => {
         server.close((error) => error ? reject(error) : resolve());
       });
     }
+  });
+
+  it("starts the overlay stream smoke with redacted result evidence", async () => {
+    const stderr = new PassThrough();
+    const child = new EventEmitter() as ReturnType<typeof import("node:child_process").spawn>;
+    Object.assign(child, { stderr });
+    const spawnImpl = vi.fn((_command, _args, _options) => {
+      queueMicrotask(() => child.emit("close", 0));
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn;
+
+    const result = await startOverlayStreamSmoke({
+      rtmpUrl: "rtmp-url-value",
+      rtmpKey: "stream-key-value",
+      overlayUrl: "http://127.0.0.1:5180/?sessionId=live-seed-001",
+      durationSeconds: 12,
+      spawnImpl
+    });
+
+    expect(result).toEqual({
+      status: "sent_overlay_stream_smoke",
+      overlayUrl: "http://127.0.0.1:5180/?sessionId=live-seed-001",
+      rtmpUrl: "present_redacted",
+      rtmpKey: "present_redacted",
+      durationSeconds: 12
+    });
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "npm",
+      ["run", "live:stream:overlay-smoke"],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          SHOPEE_RTMP_URL: "rtmp-url-value",
+          SHOPEE_RTMP_KEY: "stream-key-value",
+          LIVESELLER_STREAM_SECONDS: "12"
+        })
+      })
+    );
+    expect(JSON.stringify(result)).not.toContain("stream-key-value");
   });
 });

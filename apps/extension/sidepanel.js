@@ -8,7 +8,9 @@ const state = {
   capturedMessage: undefined,
   createProductExecuted: false,
   livestreamPrepared: false,
-  overlayOpened: false
+  overlayOpened: false,
+  shopeePreview: undefined,
+  overlayPipeStarted: false
 };
 
 function runtimeOrigin() {
@@ -85,7 +87,7 @@ function updateLaunchChecklist() {
     "create-products": state.createProductExecuted,
     "prepare-live": state.livestreamPrepared,
     "overlay-open": state.overlayOpened,
-    "seller-preview": false
+    "seller-preview": Boolean(state.shopeePreview?.rtmpUrlPresent && state.overlayPipeStarted)
   };
   for (const [name, complete] of Object.entries(checks)) {
     const node = document.querySelector(`[data-check="${name}"]`);
@@ -410,6 +412,67 @@ function prepareLivestream() {
   });
 }
 
+async function aiPrepareShopeePreview() {
+  if (!globalThis.chrome?.runtime?.sendMessage) {
+    writeLog("#livestream-log", "Chrome extension runtime is required for Shopee UI automation.");
+    return;
+  }
+
+  const response = await chrome.runtime.sendMessage({ type: "liveseller:prepare-shopee-test-preview" });
+  if (!response?.ok) {
+    state.shopeePreview = undefined;
+    $("#start-overlay-pipe").disabled = true;
+    updateLaunchChecklist();
+    writeLog("#livestream-log", {
+      status: "shopee_preview_not_ready",
+      error: response?.error,
+      previewUrl: response?.previewUrl,
+      rtmpUrlPresent: Boolean(response?.rtmpUrlPresent),
+      rtmpKeyPresent: Boolean(response?.rtmpKeyPresent),
+      goLiveVisible: Boolean(response?.goLiveVisible),
+      goLivePressed: false
+    });
+    return;
+  }
+
+  state.shopeePreview = response;
+  state.overlayPipeStarted = false;
+  $("#start-overlay-pipe").disabled = false;
+  updateLaunchChecklist();
+  writeLog("#livestream-log", {
+    status: "shopee_test_preview_ready",
+    previewUrl: response.previewUrl,
+    rtmpUrlPresent: Boolean(response.rtmpUrlPresent),
+    rtmpKeyPresent: Boolean(response.rtmpKeyPresent),
+    goLiveVisible: Boolean(response.goLiveVisible),
+    commentsVisible: Boolean(response.commentsVisible),
+    goLivePressed: false
+  });
+}
+
+async function startOverlayPreviewPipe() {
+  if (!state.shopeePreview?.rtmpUrl || !state.shopeePreview?.rtmpKey) {
+    writeLog("#livestream-log", "Prepare Shopee Test preview first.");
+    return;
+  }
+  const response = await fetchJson("/api/shopee/stream-overlay-smoke", {
+    method: "POST",
+    body: JSON.stringify({
+      rtmpUrl: state.shopeePreview.rtmpUrl,
+      rtmpKey: state.shopeePreview.rtmpKey,
+      overlayUrl: publicOverlayUrl(),
+      durationSeconds: 60
+    })
+  });
+  state.overlayPipeStarted = true;
+  updateLaunchChecklist();
+  writeLog("#livestream-log", {
+    ...response,
+    previewUrl: state.shopeePreview.previewUrl,
+    goLivePressed: false
+  });
+}
+
 async function useCapturedMessage() {
   const stored = await globalThis.chrome?.storage?.session?.get("liveseller:lastViewerMessage");
   const message = stored?.["liveseller:lastViewerMessage"];
@@ -450,6 +513,8 @@ $("#load-review-plan").addEventListener("click", () => void loadReviewPlan().cat
 $("#approve-all").addEventListener("click", () => void approveAll().catch((error) => writeLog("#command-log", error.message)));
 $("#execute-create-products").addEventListener("click", executeCreateProducts);
 $("#prepare-livestream").addEventListener("click", prepareLivestream);
+$("#ai-prepare-shopee-preview").addEventListener("click", () => void aiPrepareShopeePreview().catch((error) => writeLog("#livestream-log", error.message)));
+$("#start-overlay-pipe").addEventListener("click", () => void startOverlayPreviewPipe().catch((error) => writeLog("#livestream-log", error.message)));
 $("#open-public-overlay").addEventListener("click", openPublicOverlay);
 $("#copy-public-overlay").addEventListener("click", () => void copyPublicOverlayUrl().catch((error) => writeLog("#livestream-log", error.message)));
 $("#open-shopee-live").addEventListener("click", openShopeeLiveSetup);

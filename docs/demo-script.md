@@ -74,11 +74,12 @@ Validation path:
 3. Click `Approve or save edit`, then `Approve all`.
 4. Click `Execute create_product`; this is still dry-run readiness until real Shopee selectors are audited.
 5. Click `Prepare livestream`; expected evidence has `present_redacted` credentials and `goLivePressed:false`.
-6. Click `Copy overlay URL` or `Open public overlay`; use that URL as the public browser source for stream software or a Shopee-supported preview path.
-7. Click `Open Shopee Live setup` to move the human to Seller Centre.
-8. In Shopee, verify camera/video preview and overlay feed manually.
-9. Send a test viewer message from another account/device, then click `Use captured Shopee message` or enter a manual viewer message.
-10. Confirm seller suggestions appear only in the extension side panel and never in the public overlay.
+6. Click `Copy overlay URL` or `Open public overlay`; this is the viewer-safe browser source.
+7. Click `AI prepare Shopee Test preview`; the extension opens the authenticated Shopee Live setup, advances to Test preview, and captures RTMP credential presence without pressing `Go Live`.
+8. Click `Start overlay preview pipe`; the extension sends the transient RTMP URL/key to the local runtime, which runs the overlay stream smoke and returns only redacted evidence.
+9. In Shopee, verify camera/video preview and overlay feed manually.
+10. Send a test viewer message from another account/device, then click `Use captured Shopee message` or enter a manual viewer message.
+11. Confirm seller suggestions appear only in the extension side panel and never in the public overlay.
 
 Image edit prep can run in parallel before final approval:
 
@@ -88,7 +89,7 @@ npm run live:prep:one-image
 
 Expected timing: under 2 minutes for review/edit/approval on fixtures, 1-3 minutes for a one-image edit smoke, and 3-8 minutes target for a three-product pre-stream prep with parallel image edits after seller materials are ready.
 
-To repeat the Shopee preview ingest smoke without storing secrets, copy the RTMP URL and key from the Shopee preview page into environment variables:
+Fallback only: to repeat the Shopee preview ingest smoke without the extension button, copy the RTMP URL and key from the Shopee preview page into environment variables:
 
 ```bash
 SHOPEE_RTMP_URL='<copy Shopee URL field>' \
@@ -96,7 +97,7 @@ SHOPEE_RTMP_KEY='sg-live-...redacted...' \
 npm run live:stream:overlay-smoke
 ```
 
-The script captures the public overlay URL and pushes a short preview feed to Shopee. It redacts the URL/key from output. It does not click `Go Live`.
+The script captures the public overlay URL and pushes a short preview feed to Shopee. It redacts the URL/key from output. It does not click `Go Live`. The preferred human path is the side-panel `Start overlay preview pipe` button.
 
 ## 1:45-2:00 Summary
 

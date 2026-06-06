@@ -10,6 +10,7 @@ This document is the required real-path checkpoint before relying on Shopee sele
 - Chrome check on 2026-06-06: an authenticated Shopee Seller Centre product-list tab was visible at `https://seller.shopee.sg/portal/product/list/all?operationSortBy=modified_time`.
 - Shopee Live setup proof on 2026-06-06: direct Seller Centre `/portal/live` returned `/404`, but `https://live.shopee.sg/pc/setup?from=seller_center` opened the real `Create Streaming` page. A test stream setup advanced to `https://live.shopee.sg/pc/preview?...`, showing redacted RTMP URL/key presence, `Refresh`, comments, realtime data, and a `Go Live` button. `Go Live` was not pressed.
 - Shopee ingest proof on 2026-06-06: `ffmpeg` pushed a short public-overlay smoke feed to the redacted Shopee RTMP target. The preview page stopped showing the acquisition failure and displayed the incoming LiveSeller overlay background while buffering. Full host-camera compositing remains an OBS/browser-source setup step.
+- Extension-assisted launch update on 2026-06-06: the side panel now has `AI prepare Shopee Test preview` and `Start overlay preview pipe`. The extension creates/enters Shopee Test preview, captures RTMP credentials transiently, and calls the local runtime to start the overlay preview pipe. Raw RTMP values are not written to docs, logs, or extension session storage.
 - Seller-private UI surfaces:
   - Chrome extension side panel: `apps/extension/sidepanel.html`. This is where product review, edit, approval, create-product execution, livestream preparation, and seller-only suggestions belong during a real authenticated Shopee session.
   - Local seller console: `http://127.0.0.1:5180/?mode=seller&runtimeOrigin=http%3A%2F%2F127.0.0.1%3A8787&sessionId=live-vintage-jewelry-001`. This is a local test harness only.
@@ -43,7 +44,7 @@ Record these before enabling real sends:
 | Escalate risky message | Implemented as seller-only command | Blocked pending audit | No public auto-send |
 | Read active product | Contracted | Blocked pending audit | Needs seller UI selector |
 | Show overlay promo | Implemented in overlay app | Mock only | Must distinguish Shopee-backed vs overlay-only |
-| Prepare livestream | Implemented as dry-run command | Test setup and RTMP ingest proven | `goLive:false`, redacted credential presence only |
+| Prepare livestream | Implemented as dry-run command plus extension-assisted Test preview | Test setup and RTMP ingest proven | `goLive:false`, redacted credential presence only |
 | Press Go Live | Not automated | Blocked pending explicit approval | Manual Shopee Seller Centre click after camera preview |
 | Seller suggestions | Implemented in extension side panel and local seller console | Blocked pending live chat selector audit | Must remain side panel/seller console only, never public overlay |
 | Realtime voice translation | Server-owned endpoint scaffolded | Blocked without server `OPENAI_API_KEY` and seller mic approval | Browser receives ephemeral client secret only |

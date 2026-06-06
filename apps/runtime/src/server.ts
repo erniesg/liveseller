@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import {
   ProductReviewDecisionSchema,
   ProductReviewPlanSchema,
@@ -92,6 +93,64 @@ async function readJson(req: import("node:http").IncomingMessage) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+export type OverlayStreamSmokeResult = {
+  status: "sent_overlay_stream_smoke";
+  overlayUrl: string;
+  rtmpUrl: "present_redacted";
+  rtmpKey: "present_redacted";
+  durationSeconds: number;
+};
+
+export async function startOverlayStreamSmoke(input: {
+  rtmpUrl: string;
+  rtmpKey: string;
+  overlayUrl: string;
+  durationSeconds?: number;
+  spawnImpl?: typeof spawn;
+}): Promise<OverlayStreamSmokeResult> {
+  if (!input.rtmpUrl || !input.rtmpKey) {
+    throw new Error("Shopee preview RTMP URL and key are required.");
+  }
+  const durationSeconds = input.durationSeconds ?? 60;
+  const child = (input.spawnImpl ?? spawn)("npm", ["run", "live:stream:overlay-smoke"], {
+    cwd: new URL("../../..", import.meta.url),
+    env: {
+      ...process.env,
+      LIVESELLER_OVERLAY_URL: input.overlayUrl,
+      LIVESELLER_STREAM_SECONDS: String(durationSeconds),
+      SHOPEE_RTMP_URL: input.rtmpUrl,
+      SHOPEE_RTMP_KEY: input.rtmpKey
+    },
+    stdio: ["ignore", "ignore", "pipe"]
+  });
+
+  let stderr = "";
+  child.stderr?.on("data", (chunk) => {
+    stderr += String(chunk)
+      .replaceAll(input.rtmpUrl, "rtmp_url_present_redacted")
+      .replaceAll(input.rtmpKey, "stream_key_present_redacted");
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`overlay stream smoke failed with exit ${code}: ${stderr.slice(-1200)}`));
+    });
+  });
+
+  return {
+    status: "sent_overlay_stream_smoke",
+    overlayUrl: input.overlayUrl,
+    rtmpUrl: "present_redacted",
+    rtmpKey: "present_redacted",
+    durationSeconds
+  };
+}
+
 export function createRuntimeServer() {
   return createServer(async (req, res) => {
     try {
@@ -141,6 +200,18 @@ export function createRuntimeServer() {
       if (req.method === "POST" && req.url === "/api/runtime/realtime/session") {
         const session = await createRealtimeClientSecret();
         sendJson(res, session.status, session.body);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/shopee/stream-overlay-smoke") {
+        const body = await readJson(req);
+        const result = await startOverlayStreamSmoke({
+          rtmpUrl: String(body.rtmpUrl ?? ""),
+          rtmpKey: String(body.rtmpKey ?? ""),
+          overlayUrl: String(body.overlayUrl ?? ""),
+          durationSeconds: Number.isFinite(body.durationSeconds) ? Number(body.durationSeconds) : undefined
+        });
+        sendJson(res, 200, result);
         return;
       }
 
