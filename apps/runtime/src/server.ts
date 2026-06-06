@@ -3,9 +3,9 @@ import {
   RuntimeEventSchema,
   validLiveSessionSpec
 } from "@liveseller/contracts";
-import { routeRuntimeEvent } from "./runtime";
+import { createRuntimeSessionStore } from "./sessionStore";
 
-const auditLog: unknown[] = [];
+const sessionStore = createRuntimeSessionStore(validLiveSessionSpec);
 
 function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json" });
@@ -35,14 +35,23 @@ export function createRuntimeServer() {
 
       if (req.method === "POST" && req.url === "/api/runtime/events") {
         const event = RuntimeEventSchema.parse(await readJson(req));
-        const routed = routeRuntimeEvent(event, validLiveSessionSpec);
-        auditLog.push(...routed.auditEvents);
+        const routed = sessionStore.route(event);
         sendJson(res, 200, routed);
         return;
       }
 
       if (req.method === "GET" && req.url === `/api/audit/${validLiveSessionSpec.sessionId}`) {
-        sendJson(res, 200, auditLog);
+        sendJson(res, 200, sessionStore.snapshot().auditEvents);
+        return;
+      }
+
+      if (req.method === "GET" && req.url === `/api/live-sessions/${validLiveSessionSpec.sessionId}/memory`) {
+        sendJson(res, 200, sessionStore.snapshot());
+        return;
+      }
+
+      if (req.method === "GET" && req.url === `/api/live-sessions/${validLiveSessionSpec.sessionId}/summary`) {
+        sendJson(res, 200, sessionStore.summary());
         return;
       }
 

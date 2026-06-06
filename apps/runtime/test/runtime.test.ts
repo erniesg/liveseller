@@ -17,6 +17,7 @@ import {
   decideActions,
   routeRuntimeEvent
 } from "../src/runtime";
+import { createRuntimeSessionStore } from "../src/sessionStore";
 
 function viewerEvent(text: string, language?: LanguageCode): RuntimeEvent {
   return {
@@ -188,5 +189,46 @@ describe("live brain policy runtime", () => {
       ])
     });
     expect(buildShopeeCreateProductCommands(updatedPlan)).toEqual([]);
+  });
+
+  it("seeds product DB and updates viewer, session memory, and rolling summary", () => {
+    const store = createRuntimeSessionStore(validLiveSessionSpec);
+    const productId = validLiveSessionSpec.products[0]!.id;
+
+    expect(store.getProduct(productId)?.title).toBe(validLiveSessionSpec.products[0]!.title);
+
+    const result = store.route(viewerEvent("How much is the Bamboo Cooling Tee?", "en"));
+    expect(result.context.sessionMemory.productInterest[productId]).toBe(0);
+
+    const snapshot = store.snapshot();
+    expect(snapshot.sessionMemory.topQuestions).toContain("How much is the Bamboo Cooling Tee?");
+    expect(snapshot.sessionMemory.languageCounts.en).toBe(1);
+    expect(snapshot.sessionMemory.productInterest[productId]).toBeGreaterThan(0);
+    expect(snapshot.viewerMemory[0]).toMatchObject({
+      viewerId: "viewer-test",
+      displayName: "Test Viewer",
+      preferredLanguage: "en"
+    });
+    expect(snapshot.viewerMemory[0]?.knownQuestions).toContain("How much is the Bamboo Cooling Tee?");
+    expect(snapshot.auditEvents.length).toBeGreaterThan(0);
+
+    const closed = store.route({
+      eventId: "event-stream-closed",
+      sessionId: validLiveSessionSpec.sessionId,
+      timestamp: "2026-06-06T02:10:00.000Z",
+      source: "runtime",
+      type: "stream_lifecycle",
+      payload: {
+        status: "closed",
+        reason: "demo complete"
+      }
+    });
+
+    expect(closed.rollingSummary).toMatchObject({
+      sessionId: validLiveSessionSpec.sessionId,
+      status: "closed",
+      eventCount: 2
+    });
+    expect(store.summary().status).toBe("closed");
   });
 });

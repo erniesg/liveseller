@@ -386,8 +386,17 @@ export function createAuditEvents(
   return [input, contextEvent, ...actionEvents];
 }
 
-export function routeRuntimeEvent(event: RuntimeEvent, session: LiveSessionSpec) {
-  const context = buildContextEnvelope(event, session);
+export function routeRuntimeEvent(
+  event: RuntimeEvent,
+  session: LiveSessionSpec,
+  memory: {
+    viewerMemory?: ViewerMemory;
+    sessionMemory?: SessionMemory;
+    currentProductId?: string;
+    currentPromoId?: string;
+  } = {}
+) {
+  const context = buildContextEnvelope(event, session, memory);
   const actions = decideActions(context);
   const toolResults = executeFakeAdapters(actions);
   const auditEvents = [

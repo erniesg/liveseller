@@ -4,3 +4,5 @@ export * from "./adapters";
 export * from "./overlay";
 export * from "./postStream";
 export * from "./approvals";
+export * from "./sessionStore";
+export * from "./streamWatcher";
