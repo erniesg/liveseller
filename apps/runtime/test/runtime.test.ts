@@ -88,6 +88,27 @@ describe("live brain policy runtime", () => {
     expect(result.overlayState.translatedCaptions.some((caption) => caption.language === "en")).toBe(true);
   });
 
+  it("routes fake host audio chunks through the caption and translation path", () => {
+    const event: RuntimeEvent = {
+      eventId: "event-host-audio-zh",
+      sessionId: validLiveSessionSpec.sessionId,
+      timestamp: "2026-06-06T02:00:00.000Z",
+      source: "host",
+      type: "host_audio_chunk",
+      payload: {
+        audioRef: "demo-host-zh-tee",
+        durationMs: 1200,
+        format: "pcm16"
+      }
+    };
+
+    const result = routeRuntimeEvent(event, validLiveSessionSpec);
+    expect(result.actions.map((action) => action.type)).toContain("update_caption");
+    expect(result.actions.map((action) => action.type)).toContain("emit_translation");
+    expect(result.overlayState.caption.language).toBe("zh");
+    expect(result.overlayState.translatedCaptions.some((caption) => caption.language === "en")).toBe(true);
+  });
+
   it("marks host flash-promo announcements as overlay-only unless Shopee-backed", () => {
     const event: RuntimeEvent = {
       eventId: "event-host-promo",

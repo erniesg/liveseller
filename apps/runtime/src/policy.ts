@@ -167,22 +167,60 @@ export function isFlashPromoAnnouncement(event: RuntimeEvent): boolean {
   );
 }
 
-export function translateCaption(text: string, sourceLanguage: LanguageCode): string {
+export function translateCaption(
+  text: string,
+  sourceLanguage: LanguageCode,
+  targetLanguage: LanguageCode = "en"
+): string {
+  if (sourceLanguage === targetLanguage) {
+    return text;
+  }
+
   if (sourceLanguage === "zh") {
-    if (text.includes("竹纤维") || text.includes("T恤")) {
-      return "This bamboo cooling tee is great for Singapore weather today.";
+    if (targetLanguage === "en") {
+      if (text.includes("竹纤维") || text.includes("T恤")) {
+        return "This bamboo cooling tee is great for Singapore weather today.";
+      }
+      if (text.includes("直播优惠") || text.includes("限时")) {
+        return "This is a limited-time livestream promo.";
+      }
+      return "The host is introducing the current product.";
     }
-    if (text.includes("直播优惠") || text.includes("限时")) {
-      return "This is a limited-time livestream promo.";
+    if (targetLanguage === "ms") {
+      return "Hos sedang memperkenalkan produk semasa.";
     }
-    return "The host is introducing the current product.";
+    return "தொகுப்பாளர் தற்போதைய தயாரிப்பை அறிமுகப்படுத்துகிறார்.";
+  }
+
+  if (sourceLanguage === "en") {
+    if (targetLanguage === "zh") {
+      return "主播正在介绍当前商品。";
+    }
+    if (targetLanguage === "ms") {
+      return "Hos sedang memperkenalkan produk semasa.";
+    }
+    if (targetLanguage === "ta") {
+      return "தொகுப்பாளர் தற்போதைய தயாரிப்பை அறிமுகப்படுத்துகிறார்.";
+    }
   }
 
   if (sourceLanguage === "ms") {
+    if (targetLanguage === "zh") {
+      return "主播正在用马来语介绍当前商品。";
+    }
+    if (targetLanguage === "ta") {
+      return "தொகுப்பாளர் மலாயில் தற்போதைய தயாரிப்பை அறிமுகப்படுத்துகிறார்.";
+    }
     return "The host is introducing the current product in Malay.";
   }
 
   if (sourceLanguage === "ta") {
+    if (targetLanguage === "zh") {
+      return "主播正在用泰米尔语介绍当前商品。";
+    }
+    if (targetLanguage === "ms") {
+      return "Hos sedang memperkenalkan produk semasa dalam bahasa Tamil.";
+    }
     return "The host is introducing the current product in Tamil.";
   }
 
