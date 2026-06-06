@@ -573,6 +573,8 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("setInterval(() => void refreshSellerTimeline().catch(() => undefined), 2000)");
     expect(sidePanelScript).toContain("Approve all complete");
     expect(sidePanelScript).toContain("handleApproveAllClick");
+    expect(sidePanelScript).toContain("autoSubmit: false");
+    expect(sidePanelScript).toContain("Approving product, generating clean product photo");
     expect(sidePanelScript).not.toContain("Approve and create product");
     expect(sidePanelScript).toContain("Shopee publish queue complete");
     expect(sidePanelScript).toContain("Livestream product context ready");
@@ -642,7 +644,10 @@ describe("Shopee extension command safety", () => {
     expect(background).toContain("resetToNewProduct: true");
     expect(background).toContain("resetToNewProduct: false");
     expect(background).toContain("skipImages: true");
-    expect(background).toContain("already_uploaded_before_submit");
+    expect(background).toContain("not_basic_section");
+    expect(background).toContain('section: "basic"');
+    expect(background).toContain('section: "sales"');
+    expect(background).toContain('section: "shipping"');
     expect(background).toContain("shipping_submit");
     expect(background).toContain("enableFirstShippingOption");
     expect(background).toContain("liveseller:confirm-go-live");

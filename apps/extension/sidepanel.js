@@ -20,6 +20,7 @@ const state = {
   queuedProductCreation: [],
   productCreationFilled: false,
   productCreationInFlight: false,
+  approveAllInFlight: false,
   productEvents: [],
   realtimeAgentConnected: false,
   realtimeToolCalls: [],
@@ -646,8 +647,10 @@ function renderReviewPlan() {
     ? `${state.reviewPlan.status} - ${items.length} products`
     : "No review plan loaded.";
   const canApproveAll = Boolean(state.reviewPlan && (pendingItems.length > 0 || approvedCommands.length > 0));
-  $("#approve-all-sticky").disabled = !canApproveAll || state.productCreationInFlight;
-  $("#approve-all-sticky").textContent = pendingItems.length > 0
+  $("#approve-all-sticky").disabled = !canApproveAll || state.productCreationInFlight || state.approveAllInFlight;
+  $("#approve-all-sticky").textContent = state.approveAllInFlight
+    ? "Approving and creating..."
+    : pendingItems.length > 0
     ? "Approve all and create products"
     : state.productCreationInFlight ? "Creating product..." : "Retry creating approved products";
   $("#approve-all-sticky-bar").toggleAttribute("hidden", !canApproveAll);
@@ -1143,7 +1146,7 @@ async function submitDecision(card, item, status) {
       productId: decision.productId
     });
     appendProductEvent("Product approved", `${decision.productId}; ${state.createProductCommands.length} create command(s) ready.`, "success");
-    void queueShopeeProductCreation({ autoSubmit: true, prepareLive: true }).catch((error) => writeLog("#product-creation-log", error.message));
+    void queueShopeeProductCreation({ autoSubmit: false, prepareLive: true }).catch((error) => writeLog("#product-creation-log", error.message));
     return;
   }
 
@@ -1163,17 +1166,25 @@ async function submitDecision(card, item, status) {
   renderReviewPlan();
   renderCommands();
   if (decision.status === "approved" || decision.status === "edited") {
-    void queueShopeeProductCreation({ autoSubmit: true, prepareLive: true }).catch((error) => writeLog("#product-creation-log", error.message));
+    void queueShopeeProductCreation({ autoSubmit: false, prepareLive: true }).catch((error) => writeLog("#product-creation-log", error.message));
   }
 }
 
 async function approveAll() {
+  if (state.approveAllInFlight || state.productCreationInFlight) {
+    appendProductEvent("Approve all already running", "Wait for the current approval or Shopee fill to finish.", "warning");
+    return;
+  }
+  state.approveAllInFlight = true;
+  $("#product-step-status").textContent = "Approving product, generating clean product photo, then filling Shopee for manual review...";
+  renderReviewPlan();
+  try {
   const pending = pendingReviewItems();
   if (pending.length === 0) {
     const approvedCommands = approvedCreateProductCommands();
     if (approvedCommands.length > 0) {
       appendProductEvent("Shopee creation retry started", "Retrying the first approved product only.");
-      await queueShopeeProductCreation({ autoSubmit: true, prepareLive: true });
+      await queueShopeeProductCreation({ autoSubmit: false, prepareLive: true });
       return;
     }
     if (state.reviewPlanSource === "operator" && state.reviewPlan && publishableItems().length > 0) {
@@ -1196,7 +1207,7 @@ async function approveAll() {
       renderReviewPlan();
       renderCommands();
       appendProductEvent("Create command rebuilt", "One Shopee create command is ready.", "success");
-      await queueShopeeProductCreation({ autoSubmit: true, prepareLive: true });
+      await queueShopeeProductCreation({ autoSubmit: false, prepareLive: true });
       return;
     }
     appendProductEvent("Approve all skipped", "No pending or approved products are ready to create.");
@@ -1241,7 +1252,7 @@ async function approveAll() {
     renderReviewPlan();
     renderCommands();
     appendProductEvent("Approve all complete", "One Shopee create command is ready.", "success");
-    await queueShopeeProductCreation({ autoSubmit: true, prepareLive: true });
+    await queueShopeeProductCreation({ autoSubmit: false, prepareLive: true });
     return;
   }
 
@@ -1249,6 +1260,10 @@ async function approveAll() {
   const card = latest ? document.querySelector(`[data-product-id="${latest.productId}"]`) : undefined;
   if (latest && card) {
     await submitDecision(card, latest, "approved");
+  }
+  } finally {
+    state.approveAllInFlight = false;
+    renderReviewPlan();
   }
 }
 

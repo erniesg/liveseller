@@ -284,36 +284,53 @@ function fillShopeeCreateProductForm(command, options = {}) {
   if (!product) {
     return { ok: false, error: "missing_product_payload" };
   }
-  const uploadedImages = options.submit === true || options.skipImages === true
-    ? { selector: undefined, count: 0, skipped: "already_uploaded_before_submit" }
-    : uploadImages(product);
-  const filled = [
-    write([
-      "[name='product_name']",
-      "[name='name']",
-      "input[maxlength='120']",
-      "input[placeholder*='Product Name' i]",
-      "input[placeholder*='product name' i]",
-      "input[placeholder*='Brand Name' i]",
-      "input[placeholder*='Product Type' i]"
-    ], product.title) || writeNearLabel(["product name"], product.title, "title", "input"),
-    write(["textarea[name='description']", "[name='description']", "textarea[placeholder*='description' i]"], product.description)
-      || writeNearLabel(["product description", "description"], product.description, "description", "textarea, [contenteditable='true']"),
-    write(["[name='price']", "input[placeholder*='price' i]"], product.price)
-      || writeNearLabel(["price"], product.price, "price", "input"),
-    write(["[name='stock']", "input[placeholder*='stock' i]"], product.stock)
-      || writeNearLabel(["stock"], product.stock, "stock", "input"),
-    write(["[name='sku']", "input[placeholder*='sku' i]"], product.sku),
-    write(["[name='weight']", "input[placeholder*='weight' i]"], product.shipping?.weightKg || 0.2)
-      || writeVisibleByPlaceholder(["weight"], product.shipping?.weightKg || 0.2, "weight"),
-    writeVisibleByPlaceholder(["w (integer)", "width"], product.shipping?.widthCm || 10, "parcelWidth"),
-    writeVisibleByPlaceholder(["l", "length"], product.shipping?.lengthCm || 10, "parcelLength"),
-    writeVisibleByPlaceholder(["h (integer)", "height"], product.shipping?.heightCm || 5, "parcelHeight"),
-    enableFirstShippingOption()
-  ].filter(Boolean);
+  const section = options.section || "basic";
+  const uploadedImages = section === "basic" && options.submit !== true && options.skipImages !== true
+    ? uploadImages(product)
+    : { selector: undefined, count: 0, skipped: "not_basic_section" };
+  const filled = [];
+
+  if (section === "basic") {
+    filled.push(
+      write([
+        "[name='product_name']",
+        "[name='name']",
+        "input[maxlength='120']",
+        "input[placeholder*='Product Name' i]",
+        "input[placeholder*='product name' i]",
+        "input[placeholder*='Brand Name' i]",
+        "input[placeholder*='Product Type' i]"
+      ], product.title) || writeNearLabel(["product name"], product.title, "title", "input"),
+      write(["textarea[name='description']", "[name='description']", "textarea[placeholder*='description' i]"], product.description)
+        || writeNearLabel(["product description", "description"], product.description, "description", "textarea, [contenteditable='true']"),
+      write(["[name='sku']", "input[placeholder*='sku' i]"], product.sku)
+    );
+  }
+
+  if (section === "sales") {
+    filled.push(
+      write(["[name='price']", "input[placeholder*='price' i]"], product.price)
+        || writeNearLabel(["price"], product.price, "price", "input"),
+      write(["[name='stock']", "input[placeholder*='stock' i]"], product.stock)
+        || writeNearLabel(["stock"], product.stock, "stock", "input")
+    );
+  }
+
+  if (section === "shipping") {
+    filled.push(
+      write(["[name='weight']", "input[placeholder*='weight' i]"], product.shipping?.weightKg || 0.2)
+        || writeVisibleByPlaceholder(["weight"], product.shipping?.weightKg || 0.2, "weight"),
+      writeVisibleByPlaceholder(["w (integer)", "width"], product.shipping?.widthCm || 10, "parcelWidth"),
+      writeVisibleByPlaceholder(["length", "l (integer)"], product.shipping?.lengthCm || 10, "parcelLength"),
+      writeVisibleByPlaceholder(["h (integer)", "height"], product.shipping?.heightCm || 5, "parcelHeight"),
+      enableFirstShippingOption()
+    );
+  }
+
+  const filteredFilled = filled.filter(Boolean);
   return {
-    ok: filled.length >= 3 || uploadedImages.count > 0,
-    filled,
+    ok: filteredFilled.length > 0 || uploadedImages.count > 0,
+    filled: filteredFilled,
     uploadedImages,
     submitted: options.submit === true
       ? clickButtonByText(["Save and Publish", "Save and Delist", "Publish"])
@@ -460,7 +477,7 @@ async function fillShopeeProductDraft(tab, command, options = {}) {
   let [result] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: fillShopeeCreateProductForm,
-    args: [command, { submit: false, skipImages: options.submit === true }]
+    args: [command, { section: "basic", submit: false, skipImages: options.submit === true }]
   });
   steps.push({ step: "basic", result: result?.result });
 
@@ -474,7 +491,7 @@ async function fillShopeeProductDraft(tab, command, options = {}) {
   [result] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: fillShopeeCreateProductForm,
-    args: [command, { submit: false, skipImages: true }]
+    args: [command, { section: "sales", submit: false, skipImages: true }]
   });
   steps.push({ step: "sales", result: result?.result });
 
@@ -488,7 +505,7 @@ async function fillShopeeProductDraft(tab, command, options = {}) {
   [result] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: fillShopeeCreateProductForm,
-    args: [command, { submit: options.submit === true, skipImages: true }]
+    args: [command, { section: "shipping", submit: options.submit === true, skipImages: true }]
   });
   steps.push({ step: options.submit === true ? "shipping_submit" : "shipping", result: result?.result });
 
