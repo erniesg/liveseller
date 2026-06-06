@@ -13,7 +13,7 @@
 - `packages/contracts`
   - Shared schemas, fixtures, storage contracts, and type exports.
 - `apps/prep`
-  - Deterministic seed/upload extraction into catalog, promo, policy, assets, and `LiveSessionSpec`.
+  - Deterministic seller-material ingestion into structured product identity, catalog, promo, policy, assets, photo enhancement plans, seller UI policy, and `LiveSessionSpec`.
 - `apps/runtime`
   - Server-owned runtime, policy gates, fake adapters, overlay state, audit events, summaries, local API.
 - `apps/overlay`

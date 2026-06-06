@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, extname, join } from "node:path";
+import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type EvidenceCitation,
@@ -68,6 +68,14 @@ export type SellerDropFolderExtractionOptions = {
   liveSessionSpec?: LiveSessionSpec;
 };
 
+export type IngestedSellerFile = {
+  fileName: string;
+  absolutePath: string;
+  relativePath: string;
+  kind: "image" | "document" | "other";
+  sizeBytes: number;
+};
+
 export type SellerGuidance = {
   productId: string;
   talkTrack: string;
@@ -83,6 +91,55 @@ export type ImageGenerationPlan = {
   prompts: string[];
 };
 
+export type ProductIdentityDraft = {
+  productId: string;
+  title: string;
+  sku: string;
+  aliases: string[];
+  category: string;
+  price: number;
+  currency: ProductRecord["currency"];
+  stock: number;
+  variantCount: number;
+  imageCount: number;
+  sourceConfidence: number;
+  identitySource: "structured_fixture";
+  missingFields: string[];
+  evidence: EvidenceCitation[];
+};
+
+export type SellerUiPolicy = {
+  sessionId: string;
+  status: "seller_review_required" | "ready_for_live_review";
+  products: Array<{
+    productId: string;
+    title: string;
+    sku: string;
+    priceLabel: string;
+    stockLabel: string;
+    imageCount: number;
+    missingFields: string[];
+    reviewRequired: boolean;
+  }>;
+  photoEnhancement: Array<{
+    productId: string;
+    model: "gpt-image-2";
+    sourceImageCount: number;
+    promptCount: number;
+    requiresApproval: boolean;
+  }>;
+  publicAutomation: {
+    autoSend: "low_risk_structured_only";
+    approvalRequired: string[];
+    blockedAutoSend: string[];
+  };
+  renderHints: {
+    sidePanelSectionId: "liveseller-prep-review";
+    productAttribute: "data-liveseller-product-id";
+    actionAttribute: "data-liveseller-action-id";
+  };
+};
+
 export type PrepExtractionResult = {
   products: ProductRecord[];
   promos: PromoRecord[];
@@ -93,6 +150,13 @@ export type PrepExtractionResult = {
   liveSessionSpec: LiveSessionSpec;
   sellerGuidance: SellerGuidance[];
   imageGenerationPlan: ImageGenerationPlan[];
+};
+
+export type SellerMaterialIngestionResult = PrepExtractionResult & {
+  ingestedFiles: IngestedSellerFile[];
+  productIdentityDrafts: ProductIdentityDraft[];
+  photoEnhancementPlan: ImageGenerationPlan[];
+  sellerUiPolicy: SellerUiPolicy;
 };
 
 const requiredSeedFiles = ["product-notes.md", "policy-notes.md", "promo-notes.csv"];
@@ -146,6 +210,55 @@ export function buildMissingFieldReport(
 }
 
 const supportedImageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const supportedDocumentExtensions = new Set([
+  ".csv",
+  ".doc",
+  ".docx",
+  ".json",
+  ".md",
+  ".pdf",
+  ".txt",
+  ".xls",
+  ".xlsx"
+]);
+
+function fileKind(fileName: string): IngestedSellerFile["kind"] {
+  const extension = extname(fileName).toLowerCase();
+  if (supportedImageExtensions.has(extension)) {
+    return "image";
+  }
+  if (supportedDocumentExtensions.has(extension)) {
+    return "document";
+  }
+  return "other";
+}
+
+export function discoverSellerMaterialFiles(inputPath: string): IngestedSellerFile[] {
+  if (!existsSync(inputPath)) {
+    throw new Error(`Seller material path not found: ${inputPath}`);
+  }
+
+  const rootStats = statSync(inputPath);
+  const root = rootStats.isDirectory() ? inputPath : dirname(inputPath);
+  const paths = rootStats.isDirectory()
+    ? readdirSync(inputPath, { recursive: true }).map((entry) => join(inputPath, String(entry)))
+    : [inputPath];
+
+  return paths
+    .filter((path) => statSync(path).isFile())
+    .filter((path) => !path.split("/").some((part) => part.startsWith(".")))
+    .map((path) => {
+      const stats = statSync(path);
+      return {
+        fileName: path.split("/").at(-1) ?? path,
+        absolutePath: path,
+        relativePath: relative(root, path),
+        kind: fileKind(path),
+        sizeBytes: stats.size
+      };
+    })
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+}
 
 type DropFolderImageMatch = {
   product: ProductRecord;
@@ -308,6 +421,92 @@ export function buildImageGenerationPlan(products = vintageJewelryProducts): Ima
   }));
 }
 
+export function buildProductIdentityDrafts(
+  products: ProductRecord[],
+  missingFieldReport: MissingFieldReport
+): ProductIdentityDraft[] {
+  return products.map((product) => {
+    const missingFields =
+      missingFieldReport.missingByProduct.find((row) => row.productId === product.id)?.missingFields ?? [];
+
+    return {
+      productId: product.id,
+      title: product.title,
+      sku: product.sku,
+      aliases: product.aliases,
+      category: product.category,
+      price: product.price,
+      currency: product.currency,
+      stock: product.stock,
+      variantCount: product.variants.length,
+      imageCount: product.media.images.length,
+      sourceConfidence: product.sourceConfidence,
+      identitySource: "structured_fixture",
+      missingFields,
+      evidence: product.evidence
+    };
+  });
+}
+
+export function buildSellerUiPolicy(
+  sessionId: string,
+  products: ProductRecord[],
+  missingFieldReport: MissingFieldReport,
+  photoEnhancementPlan: ImageGenerationPlan[]
+): SellerUiPolicy {
+  const productRows = products.map((product) => {
+    const missingFields =
+      missingFieldReport.missingByProduct.find((row) => row.productId === product.id)?.missingFields ?? [];
+
+    return {
+      productId: product.id,
+      title: product.title,
+      sku: product.sku,
+      priceLabel: `${product.currency} ${product.price.toFixed(2)}`,
+      stockLabel: `${product.stock} in structured stock`,
+      imageCount: product.media.images.length,
+      missingFields,
+      reviewRequired: missingFields.length > 0 || product.sourceConfidence < 0.95
+    };
+  });
+
+  return {
+    sessionId,
+    status: productRows.some((product) => product.reviewRequired)
+      ? "seller_review_required"
+      : "ready_for_live_review",
+    products: productRows,
+    photoEnhancement: photoEnhancementPlan.map((plan) => ({
+      productId: plan.productId,
+      model: plan.model,
+      sourceImageCount: plan.sourceImageUris.length,
+      promptCount: plan.prompts.length,
+      requiresApproval: true
+    })),
+    publicAutomation: {
+      autoSend: "low_risk_structured_only",
+      approvalRequired: [
+        "refund or return commitment",
+        "legal, fraud, fake, or counterfeit accusation",
+        "discounts not backed by structured Shopee promo records",
+        "material, authenticity, warranty, or condition claims missing from structured records"
+      ],
+      blockedAutoSend: [
+        "fake-product accusation",
+        "fraud or legal threat",
+        "refund commitment",
+        "unauthorized discount",
+        "unclear risky request"
+      ]
+    },
+    renderHints: {
+      sidePanelSectionId: "liveseller-prep-review",
+      productAttribute: "data-liveseller-product-id",
+      actionAttribute: "data-liveseller-action-id"
+    }
+  };
+}
+
 export function buildSellerDropFolderExtraction(
   folder = DEFAULT_SELLER_DROP_FOLDER,
   options: SellerDropFolderExtractionOptions = {}
@@ -336,6 +535,35 @@ export function buildSellerDropFolderExtraction(
     liveSessionSpec: session,
     sellerGuidance: buildSellerGuidance(products),
     imageGenerationPlan: buildImageGenerationPlan(products)
+  };
+}
+
+export function buildSellerMaterialIngestion(
+  inputPath = DEFAULT_SELLER_DROP_FOLDER,
+  options: SellerDropFolderExtractionOptions = {}
+): SellerMaterialIngestionResult {
+  const ingestedFiles = discoverSellerMaterialFiles(inputPath);
+  const inputStats = statSync(inputPath);
+  const extractionFolder = inputStats.isDirectory() ? inputPath : dirname(inputPath);
+  const extraction = buildSellerDropFolderExtraction(extractionFolder, options);
+  const productIdentityDrafts = buildProductIdentityDrafts(
+    extraction.products,
+    extraction.missingFieldReport
+  );
+  const photoEnhancementPlan = extraction.imageGenerationPlan;
+  const sellerUiPolicy = buildSellerUiPolicy(
+    extraction.liveSessionSpec.sessionId,
+    extraction.products,
+    extraction.missingFieldReport,
+    photoEnhancementPlan
+  );
+
+  return {
+    ...extraction,
+    ingestedFiles,
+    productIdentityDrafts,
+    photoEnhancementPlan,
+    sellerUiPolicy
   };
 }
 

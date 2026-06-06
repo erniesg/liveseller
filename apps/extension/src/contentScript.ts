@@ -50,6 +50,38 @@ export type HandleReceiveNormalUserMessageOptions = {
   renderTarget?: Element;
 };
 
+export type SellerUiPolicyPayload = {
+  sessionId: string;
+  status: "seller_review_required" | "ready_for_live_review";
+  products: Array<{
+    productId: string;
+    title: string;
+    sku: string;
+    priceLabel: string;
+    stockLabel: string;
+    imageCount: number;
+    missingFields: string[];
+    reviewRequired: boolean;
+  }>;
+  photoEnhancement: Array<{
+    productId: string;
+    model: "gpt-image-2";
+    sourceImageCount: number;
+    promptCount: number;
+    requiresApproval: boolean;
+  }>;
+  publicAutomation: {
+    autoSend: "low_risk_structured_only";
+    approvalRequired: string[];
+    blockedAutoSend: string[];
+  };
+  renderHints: {
+    sidePanelSectionId: string;
+    productAttribute: string;
+    actionAttribute: string;
+  };
+};
+
 export type HandledReceiveNormalUserMessage = {
   event: RuntimeEvent;
   runtimeResponse: RuntimeActionResponse;
@@ -273,6 +305,51 @@ export function renderReviewPayload(target: Element, payload: ReviewPayload): vo
       approval.setAttribute("data-liveseller-approval-required", "true");
       approval.textContent = action.approvalId ?? "approval-required";
       article.append(approval);
+    }
+
+    section.append(article);
+  }
+
+  target.replaceChildren(section);
+}
+
+export function renderSellerUiPolicy(target: Element, policy: SellerUiPolicyPayload): void {
+  const doc = target.ownerDocument;
+  const section = doc.createElement("section");
+  section.id = policy.renderHints.sidePanelSectionId;
+
+  const heading = doc.createElement("h2");
+  heading.textContent = "Seller review";
+  section.append(heading);
+
+  const status = doc.createElement("p");
+  status.setAttribute("data-liveseller-policy-status", policy.status);
+  status.textContent = `${policy.status} - ${policy.publicAutomation.autoSend}`;
+  section.append(status);
+
+  for (const product of policy.products) {
+    const article = doc.createElement("article");
+    article.setAttribute(policy.renderHints.productAttribute, product.productId);
+
+    const title = doc.createElement("h3");
+    title.textContent = product.title;
+    article.append(title);
+
+    const facts = doc.createElement("p");
+    facts.textContent = `${product.sku} - ${product.priceLabel} - ${product.stockLabel} - ${product.imageCount} images`;
+    article.append(facts);
+
+    const missing = doc.createElement("p");
+    missing.textContent = product.missingFields.length > 0
+      ? `Review: ${product.missingFields.join(", ")}`
+      : "Review: structured identity complete";
+    article.append(missing);
+
+    const photoPlan = policy.photoEnhancement.find((plan) => plan.productId === product.productId);
+    if (photoPlan) {
+      const photo = doc.createElement("p");
+      photo.textContent = `${photoPlan.model}: ${photoPlan.promptCount} prompts from ${photoPlan.sourceImageCount} source images`;
+      article.append(photo);
     }
 
     section.append(article);

@@ -22,7 +22,7 @@ npm run typecheck
 
 Done when:
 
-- Seed folder produces 3 products, 1 promo, 1 policy pack, citations, assets, missing-field report, and valid `LiveSessionSpec`.
+- Seller material files, docs, or folders produce structured product identity drafts, promo/policy data, citations, assets, missing-field report, photo enhancement plans, seller UI policy, and valid `LiveSessionSpec`.
 - Price, stock, variants, and promo eligibility remain structured.
 - Retrieval evidence does not override structured records.
 

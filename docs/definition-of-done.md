@@ -21,7 +21,7 @@ A change is done only when:
 
 ## Lane 1 Done
 
-- Seed or upload input produces valid products, promos, policy pack, citations, assets, missing-field report, and `LiveSessionSpec`.
+- Seller material files, docs, or folders produce valid structured product identity drafts, photo enhancement plans, seller UI policy, products, promos, policy pack, citations, assets, missing-field report, and `LiveSessionSpec`.
 - Price, stock, variants, SKU, Shopee IDs, and promo eligibility remain structured.
 - Retrieval evidence does not override structured facts.
 

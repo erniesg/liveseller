@@ -8,9 +8,9 @@ Run:
 npm run demo:prep
 ```
 
-Show that the seed folder becomes 3 products, 1 promo, 1 policy pack, citations, assets, missing-field report, and `LiveSessionSpec`.
+Show that the seller material folder becomes structured product identity drafts, product records, promo/policy data, citations, assets, missing-field report, photo enhancement plans, seller UI policy, and `LiveSessionSpec`.
 
-For the seller drop folder, show that product grouping is citation-driven: each copied image is matched through a product image citation ending in `drop-folder file: <fileName>`. Human validation should confirm product count, image counts, seller talk tracks, and `gpt-image-2` prompt plans before using those records in a live session.
+Product grouping is citation-driven: each copied image is matched through a product image citation ending in `drop-folder file: <fileName>`. Human validation should confirm product count, image counts, seller talk tracks, `gpt-image-2` prompt plans, and seller UI policy before using those records in a live session.
 
 ## 0:25-0:55 Safe Live Replies
 

@@ -1,8 +1,8 @@
 # Architecture
 
 ```text
-Seller uploads / seed folder
-  -> apps/prep extracts ProductRecord, PromoRecord, PolicyPack, assets, citations
+Seller material files / docs / folders
+  -> apps/prep ingests files and extracts structured product identity, ProductRecord, PromoRecord, PolicyPack, assets, citations, photo enhancement plans, and seller UI policy
   -> LiveSessionSpec is shared through packages/contracts
   -> apps/runtime receives RuntimeEvent values
   -> ContextEnvelope combines structured facts, policy flags, memory, and citations

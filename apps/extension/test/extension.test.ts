@@ -12,6 +12,7 @@ import {
   extractViewerMessage,
   handleReceiveNormalUserMessage,
   installReceiveNormalUserMessageHook,
+  renderSellerUiPolicy,
   toViewerChatEvent
 } from "../src/contentScript";
 
@@ -152,6 +153,54 @@ describe("Shopee extension command safety", () => {
     expect(result.executedCommands[0]?.publicSend).toBe(true);
     expect(document.querySelector("[data-liveseller-action-id='action-send-price']")?.textContent)
       .toContain("Low-risk factual price answer from ProductRecord.");
+  });
+
+  it("renders seller UI policy for product identity review", () => {
+    document.body.innerHTML = '<section id="policy"></section>';
+
+    renderSellerUiPolicy(document.getElementById("policy")!, {
+      sessionId: "live-custom-material-001",
+      status: "seller_review_required",
+      products: [
+        {
+          productId: "prod-custom-camera-strap",
+          title: "Custom Camera Strap",
+          sku: "LS-CUSTOM-STRAP-001",
+          priceLabel: "SGD 19.90",
+          stockLabel: "42 in structured stock",
+          imageCount: 2,
+          missingFields: ["shopeeProductId"],
+          reviewRequired: true
+        }
+      ],
+      photoEnhancement: [
+        {
+          productId: "prod-custom-camera-strap",
+          model: "gpt-image-2",
+          sourceImageCount: 2,
+          promptCount: 3,
+          requiresApproval: true
+        }
+      ],
+      publicAutomation: {
+        autoSend: "low_risk_structured_only",
+        approvalRequired: ["refund", "legal", "discount"],
+        blockedAutoSend: ["fake-product accusation"]
+      },
+      renderHints: {
+        sidePanelSectionId: "liveseller-prep-review",
+        productAttribute: "data-liveseller-product-id",
+        actionAttribute: "data-liveseller-action-id"
+      }
+    });
+
+    const product = document.querySelector("[data-liveseller-product-id='prod-custom-camera-strap']");
+    expect(product?.textContent).toContain("Custom Camera Strap");
+    expect(product?.textContent).toContain("2 images");
+    expect(product?.textContent).toContain("shopeeProductId");
+    expect(document.querySelector("[data-liveseller-policy-status]")?.textContent).toContain(
+      "seller_review_required"
+    );
   });
 
   it("keeps OpenAI keys out of extension manifest", () => {

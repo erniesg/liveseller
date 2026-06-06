@@ -4,7 +4,7 @@
 
 All lane boundaries use the Zod schemas from `@liveseller/contracts`.
 
-- Prep emits `LiveSessionSpec`, `ProductRecord[]`, `PromoRecord[]`, `PolicyPack`, citations, assets, missing-field report, seller guidance, and image generation plans.
+- Prep emits `LiveSessionSpec`, `ProductRecord[]`, `PromoRecord[]`, `PolicyPack`, product identity drafts, citations, assets, missing-field report, seller guidance, photo enhancement plans, and seller UI policy.
 - Runtime consumes `RuntimeEvent` and emits `LiveAction[]`, `ToolResult[]`, `AuditEvent[]`, and `OverlayState`.
 - Extension consumes approved `LiveAction` values and emits `ToolResult`.
 - Overlay consumes `OverlayState` or overlay-safe `LiveAction` updates.
@@ -48,6 +48,10 @@ Implemented in `apps/extension/src/contentScript.ts`.
 
 Implemented in `apps/prep/src/index.ts`.
 
+- `discoverSellerMaterialFiles(inputPath)`
+  - Accepts a file, document, or folder and classifies each discovered file as `image`, `document`, or `other`.
+- `buildSellerMaterialIngestion(inputPath, options?)`
+  - Returns structured product identity drafts, product records, promo/policy data, citations, assets, missing-field report, seller guidance, server-side photo enhancement plans, seller UI policy, and valid `LiveSessionSpec`.
 - `discoverSellerDropFolderAssets(folder)`
   - Reads seller-supplied image files from a local folder.
   - Groups files by matching each file name to product image citations ending in `drop-folder file: <fileName>`.
@@ -55,3 +59,16 @@ Implemented in `apps/prep/src/index.ts`.
 - `buildSellerDropFolderExtraction(folder)`
   - Returns a valid `LiveSessionSpec`, structured product and promo records, seller guidance, and image generation prompts.
   - Image generation prompts target server-side `gpt-image-2` use; browser clients and extensions must not hold OpenAI API keys.
+
+## Seller UI Policy Payload
+
+Prep emits `sellerUiPolicy` for the Chrome extension side panel.
+
+- `status`
+  - `seller_review_required` until missing Shopee IDs, low confidence, or other review fields are resolved.
+- `products[]`
+  - Product title, SKU, price label, stock label, image count, missing fields, and review requirement.
+- `photoEnhancement[]`
+  - Server-side `gpt-image-2` prompt counts and source-image counts. The extension renders these; it does not call image models.
+- `publicAutomation`
+  - Low-risk structured facts are the only auto-send lane. Refund, legal, fake/counterfeit, fraud, discount, and unclear risky cases require approval or are blocked from public auto-send.

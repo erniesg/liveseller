@@ -1,44 +1,38 @@
 import { existsSync } from "node:fs";
 import {
   DEFAULT_SELLER_DROP_FOLDER,
-  buildSeedExtraction,
-  buildSellerDropFolderExtraction
+  type SellerMaterialIngestionResult,
+  buildSellerMaterialIngestion
 } from "./index";
 
-const seedResult = buildSeedExtraction();
-const sellerDropResult = existsSync(DEFAULT_SELLER_DROP_FOLDER)
-  ? buildSellerDropFolderExtraction(DEFAULT_SELLER_DROP_FOLDER)
-  : undefined;
+export type PrepDemoPayload = {
+  sellerMaterial: ReturnType<typeof summarizeSellerMaterial>;
+};
 
-console.log(
-  JSON.stringify(
-    {
-      seed: summarize(seedResult),
-      sellerDrop: sellerDropResult
-        ? {
-            ...summarize(sellerDropResult),
-            folder: DEFAULT_SELLER_DROP_FOLDER,
-            sellerGuidance: sellerDropResult.sellerGuidance.map((guidance) => ({
-              productId: guidance.productId,
-              talkTrack: guidance.talkTrack,
-              likelyBuyerQuestions: guidance.likelyBuyerQuestions
-            })),
-            imageGenerationPlan: sellerDropResult.imageGenerationPlan.map((plan) => ({
-              productId: plan.productId,
-              model: plan.model,
-              promptCount: plan.prompts.length
-            }))
-          }
-        : undefined
-    },
-    null,
-    2
-  )
-);
+export function buildPrepDemoPayload(
+  sellerMaterialPath = DEFAULT_SELLER_DROP_FOLDER
+): PrepDemoPayload {
+  if (!existsSync(sellerMaterialPath)) {
+    throw new Error(`Seller material folder not found: ${sellerMaterialPath}`);
+  }
 
-function summarize(result: ReturnType<typeof buildSeedExtraction>) {
   return {
+    sellerMaterial: summarizeSellerMaterial(
+      buildSellerMaterialIngestion(sellerMaterialPath),
+      sellerMaterialPath
+    )
+  };
+}
+
+function summarizeSellerMaterial(result: SellerMaterialIngestionResult, folder: string) {
+  return {
+    folder,
     sessionId: result.liveSessionSpec.sessionId,
+    ingestedFiles: result.ingestedFiles.map((file) => ({
+      fileName: file.fileName,
+      kind: file.kind,
+      sizeBytes: file.sizeBytes
+    })),
     products: result.products.map((product) => ({
       id: product.id,
       sku: product.sku,
@@ -54,6 +48,31 @@ function summarize(result: ReturnType<typeof buildSeedExtraction>) {
     })),
     policyPack: result.policyPack.id,
     missingFieldReport: result.missingFieldReport,
-    assets: result.assets.length
+    assets: result.assets.length,
+    productIdentityDrafts: result.productIdentityDrafts.map((draft) => ({
+      productId: draft.productId,
+      title: draft.title,
+      sku: draft.sku,
+      price: draft.price,
+      stock: draft.stock,
+      imageCount: draft.imageCount,
+      missingFields: draft.missingFields
+    })),
+    sellerGuidance: result.sellerGuidance.map((guidance) => ({
+      productId: guidance.productId,
+      talkTrack: guidance.talkTrack,
+      likelyBuyerQuestions: guidance.likelyBuyerQuestions
+    })),
+    photoEnhancementPlan: result.photoEnhancementPlan.map((plan) => ({
+      productId: plan.productId,
+      model: plan.model,
+      sourceImageCount: plan.sourceImageUris.length,
+      promptCount: plan.prompts.length
+    })),
+    sellerUiPolicy: result.sellerUiPolicy
   };
+}
+
+if (process.argv[1]?.endsWith("demo.ts")) {
+  console.log(JSON.stringify(buildPrepDemoPayload(), null, 2));
 }

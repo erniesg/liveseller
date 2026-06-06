@@ -13,11 +13,13 @@ import {
 } from "@liveseller/contracts";
 import {
   buildSellerDropFolderExtraction,
+  buildSellerMaterialIngestion,
   buildMissingFieldReport,
   discoverSellerDropFolderAssets,
   buildSeedExtraction,
   readSeedDocuments
 } from "../src/index";
+import { buildPrepDemoPayload } from "../src/demo";
 
 const sellerDropFileNames = [
   "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰.jpg",
@@ -205,5 +207,67 @@ describe("prep catalog brain", () => {
     expect(result.imageGenerationPlan[0]?.sourceImageUris).toEqual(product.media.images.map((image) => image.uri));
     expect(result.imageGenerationPlan[0]?.prompts.join(" ")).toContain("Camera Accessories");
     expect(() => LiveSessionSpecSchema.parse(result.liveSessionSpec)).not.toThrow();
+  });
+
+  it("ingests seller material into product identity, photo plans, and seller UI policy", () => {
+    const folder = mkdtempSync(join(tmpdir(), "liveseller-material-"));
+    const fileNames = ["custom-strap.jpg", "custom-strap (1).jpg"];
+    for (const fileName of fileNames) {
+      writeFileSync(join(folder, fileName), "fixture image bytes");
+    }
+    writeFileSync(join(folder, "seller-notes.md"), "# Camera strap\nConfirm strap length on camera.");
+
+    const product = customDropProduct(fileNames);
+    const result = buildSellerMaterialIngestion(folder, {
+      products: [product],
+      liveSessionSpec: {
+        ...vintageJewelryLiveSessionSpec,
+        sessionId: "live-custom-material-001",
+        products: [product]
+      }
+    });
+
+    expect(result.ingestedFiles.map((file) => file.kind).sort()).toEqual(["document", "image", "image"]);
+    expect(result.productIdentityDrafts).toEqual([
+      expect.objectContaining({
+        productId: "prod-custom-camera-strap",
+        title: "Custom Camera Strap",
+        sku: "LS-CUSTOM-STRAP-001",
+        imageCount: 2,
+        identitySource: "structured_fixture",
+        missingFields: ["shopeeProductId"]
+      })
+    ]);
+    expect(result.photoEnhancementPlan[0]).toMatchObject({
+      productId: "prod-custom-camera-strap",
+      model: "gpt-image-2",
+      sourceImageUris: product.media.images.map((image) => image.uri)
+    });
+    expect(result.sellerUiPolicy).toMatchObject({
+      sessionId: "live-custom-material-001",
+      status: "seller_review_required",
+      publicAutomation: {
+        autoSend: "low_risk_structured_only"
+      }
+    });
+    expect(result.sellerUiPolicy.products[0]).toMatchObject({
+      productId: "prod-custom-camera-strap",
+      reviewRequired: true,
+      imageCount: 2
+    });
+  });
+
+  it("surfaces actual seller fixtures in the prep demo instead of seed products", () => {
+    const sellerDropFolder = createSellerDropFolderFixture();
+    const payload = buildPrepDemoPayload(sellerDropFolder);
+
+    expect(payload.sellerMaterial.products).toHaveLength(3);
+    expect(payload.sellerMaterial.products.map((product) => product.id)).toEqual([
+      "prod-vintage-gold-grape-leaf-brooch",
+      "prod-vintage-blue-stone-bar-brooch",
+      "prod-vintage-cameo-brooch"
+    ]);
+    expect("seed" in payload).toBe(false);
+    expect(payload.sellerMaterial.sellerUiPolicy.status).toBe("seller_review_required");
   });
 });
