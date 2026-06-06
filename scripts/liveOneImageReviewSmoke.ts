@@ -92,11 +92,13 @@ async function main(): Promise<void> {
   const sellerResponseText = parseArg("seller-response")
     ?? "Please make the title shorter and show me another image prompt option.";
   const sellerIntent = parseSellerIntent(parseArg("seller-intent"));
+  const imagePrompt = parseArg("image-prompt");
 
   const livePrep = await runOneImageLivePrep({
     apiKey: required(process.env.OPENAI_API_KEY, "OPENAI_API_KEY"),
     sourceImagePath,
-    outputDir
+    outputDir,
+    imagePrompt
   });
 
   const sellerResponse = buildSellerResponse(livePrep.updatedReviewPlan, sellerResponseText, sellerIntent);
@@ -111,6 +113,8 @@ async function main(): Promise<void> {
     outputDir,
     initialReviewPlanPath: livePrep.initialReviewPlanPath,
     updatedReviewPlanPath: livePrep.updatedReviewPlanPath,
+    timingPath: livePrep.timingPath,
+    timings: livePrep.timings,
     responsePlanPath,
     generatedImagePaths: livePrep.generatedImagePaths,
     generatedImagesExist: livePrep.generatedImagePaths.map((imagePath) => existsSync(imagePath)),

@@ -452,16 +452,20 @@ describe("prep catalog brain", () => {
     writeFileSync(sourceImagePath, "fixture image bytes");
     const product = customDropProduct(["custom-strap.jpg"]);
     const fakePng = Buffer.from("generated png bytes").toString("base64");
-    const fetchImpl = vi.fn(async () => new Response(
-      JSON.stringify({
-        created: 1770000000,
-        data: [{ b64_json: fakePng }]
-      }),
-      {
-        status: 200,
-        headers: { "content-type": "application/json" }
-      }
-    ));
+    const imagePrompt = "Change the jewelry background to a clean light neutral studio surface.";
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect((init?.body as FormData).get("prompt")).toBe(imagePrompt);
+      return new Response(
+        JSON.stringify({
+          created: 1770000000,
+          data: [{ b64_json: fakePng }]
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    });
 
     const result = await runOneImageLivePrep({
       apiKey: "test-openai-key",
@@ -473,6 +477,7 @@ describe("prep catalog brain", () => {
         sessionId: "live-one-image-openai-001",
         products: [product]
       },
+      imagePrompt,
       fetchImpl
     });
 

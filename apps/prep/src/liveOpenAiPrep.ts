@@ -28,6 +28,7 @@ export type OneImageLivePrepOptions = {
   apiKey: string;
   sourceImagePath: string;
   outputDir: string;
+  imagePrompt?: string;
   products?: ProductRecord[];
   liveSessionSpec?: LiveSessionSpec;
   fetchImpl?: FetchLike;
@@ -310,7 +311,8 @@ export async function runOneImageLivePrep(options: OneImageLivePrepOptions): Pro
 
         return timing.measure(`image_edit:${task.taskId}`, async () => {
           const imagePath = imagePathByRef.get(task.inputRefs[0] ?? "") ?? inputImagePath;
-          const prompt = material.photoEnhancementPlan.find((plan) => plan.productId === task.productId)?.prompts[0]
+          const prompt = options.imagePrompt
+            ?? material.photoEnhancementPlan.find((plan) => plan.productId === task.productId)?.prompts[0]
             ?? `Create a Shopee-ready product image variant for ${product.title}. Preserve the exact product and visible condition.`;
           const imageBytes = await requestImageEdit({
             apiKey,
@@ -363,7 +365,8 @@ async function main(): Promise<void> {
   const result = await runOneImageLivePrep({
     apiKey: assertNonSecret(process.env.OPENAI_API_KEY, "OPENAI_API_KEY"),
     sourceImagePath,
-    outputDir
+    outputDir,
+    imagePrompt: parseArg("image-prompt")
   });
 
   console.log(JSON.stringify({
