@@ -1,5 +1,8 @@
 import { createServer } from "node:http";
 import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   type LiveSessionSpec,
   OverlayStateSchema,
@@ -23,6 +26,34 @@ const sessionStores = new Map(
     createRuntimeSessionStore(session)
   ])
 );
+
+export function loadRuntimeEnvFile(cwd = process.cwd()): { path?: string; loadedKeys: string[] } {
+  const envPath = join(cwd, ".env");
+  if (!existsSync(envPath)) {
+    return { loadedKeys: [] };
+  }
+  const loadedKeys: string[] = [];
+  for (const line of readFileSync(envPath, "utf8").split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const rawValue = trimmed.slice(separatorIndex + 1).trim();
+    if (!key || process.env[key]) {
+      continue;
+    }
+    process.env[key] = rawValue.replace(/^['"]|['"]$/gu, "");
+    loadedKeys.push(key);
+  }
+  return { path: envPath, loadedKeys };
+}
+
+loadRuntimeEnvFile(fileURLToPath(new URL("../../..", import.meta.url)));
 
 function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown) {
   res.writeHead(status, {

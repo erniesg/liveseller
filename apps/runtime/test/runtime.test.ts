@@ -1,5 +1,8 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   type LanguageCode,
   type RuntimeEvent,
@@ -25,6 +28,7 @@ import { createRuntimeSessionStore } from "../src/sessionStore";
 import {
   createRealtimeClientSecret,
   createRealtimeAgentSession,
+  loadRuntimeEnvFile,
   getRuntimeCameraCompositorStatus,
   createRuntimeServer,
   startOverlayStreamSmoke,
@@ -49,6 +53,37 @@ function viewerEvent(text: string, language?: LanguageCode): RuntimeEvent {
 }
 
 describe("live brain policy runtime", () => {
+  it("loads local .env values for server-only OpenAI runtime configuration", () => {
+    const dir = mkdtempSync(join(tmpdir(), "liveseller-env-test-"));
+    const previous = process.env.OPENAI_API_KEY;
+    const previousModel = process.env.OPENAI_REALTIME_MODEL;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_REALTIME_MODEL;
+    try {
+      writeFileSync(join(dir, ".env"), "OPENAI_API_KEY=env-test-key\nOPENAI_REALTIME_MODEL=gpt-realtime\n");
+      const loaded = loadRuntimeEnvFile(dir);
+
+      expect(loaded).toMatchObject({
+        path: join(dir, ".env"),
+        loadedKeys: expect.arrayContaining(["OPENAI_API_KEY", "OPENAI_REALTIME_MODEL"])
+      });
+      expect(process.env.OPENAI_API_KEY).toBe("env-test-key");
+      expect(JSON.stringify(loaded)).not.toContain("env-test-key");
+    } finally {
+      if (previous) {
+        process.env.OPENAI_API_KEY = previous;
+      } else {
+        delete process.env.OPENAI_API_KEY;
+      }
+      if (previousModel) {
+        process.env.OPENAI_REALTIME_MODEL = previousModel;
+      } else {
+        delete process.env.OPENAI_REALTIME_MODEL;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("sends low-risk factual replies in English, Chinese, Malay, and Tamil", () => {
     const messages = [
       viewerEvent("How much is the Bamboo Cooling Tee?", "en"),

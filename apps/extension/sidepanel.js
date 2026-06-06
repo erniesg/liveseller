@@ -525,7 +525,7 @@ async function requestRealtimeSession() {
     writeLog("#realtime-log", {
       status: "openai_realtime_agent_session_ready",
       agent: session.agent,
-      clientSecretPresent: !!session.client_secret,
+      clientSecretPresent: Boolean(session.client_secret || session.value),
       note: "Use the returned ephemeral client secret with @openai/agents/realtime in the seller-private UI."
     });
   } catch (error) {
@@ -543,7 +543,7 @@ async function startRealtimeAgent() {
   });
   writeLog("#realtime-log", {
     status: "openai_realtime_agent_session_ready",
-    clientSecretPresent: !!response.client_secret,
+    clientSecretPresent: Boolean(response.client_secret || response.value),
     agent: response.agent,
     note: "Use the returned ephemeral client secret with @openai/agents/realtime in the seller-private UI."
   });
