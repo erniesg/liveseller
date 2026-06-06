@@ -90,6 +90,47 @@ function logRuntime(event: string, details: Record<string, unknown>) {
   console.log(`[runtime:${event}] ${JSON.stringify(details)}`);
 }
 
+async function createRealtimeTranslationClientSecret(sourceLanguage: LanguageCode, targetLanguage: LanguageCode) {
+  if (!process.env.OPENAI_API_KEY) {
+    return {
+      status: 503,
+      body: {
+        error: "openai_api_key_missing",
+        message: "Set OPENAI_API_KEY on the runtime server to use realtime translation."
+      }
+    };
+  }
+
+  const response = await fetch("https://api.openai.com/v1/realtime/translations/client_secrets", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "content-type": "application/json",
+      "openai-safety-identifier": "liveseller-local-demo"
+    },
+    body: JSON.stringify({
+      session: {
+        model: process.env.OPENAI_REALTIME_TRANSLATION_MODEL ?? "gpt-realtime-translate",
+        audio: {
+          input: {
+            transcription: {
+              model: process.env.OPENAI_REALTIME_TRANSCRIPTION_MODEL ?? "gpt-realtime-whisper"
+            }
+          },
+          output: {
+            language: targetLanguage
+          }
+        }
+      }
+    })
+  });
+
+  return {
+    status: response.status,
+    body: await response.json()
+  };
+}
+
 export function createRuntimeServer() {
   return createServer(async (req, res) => {
     try {
@@ -194,6 +235,24 @@ export function createRuntimeServer() {
           actions: routed.actions.map((action) => action.type)
         });
         sendJson(res, 200, routed);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/runtime/realtime-translation/session") {
+        const body = await readJson(req);
+        const sourceLanguage = LanguageCodeSchema.parse(
+          typeof body.sourceLanguage === "string" ? body.sourceLanguage : "en"
+        );
+        const targetLanguage = LanguageCodeSchema.parse(
+          typeof body.targetLanguage === "string" ? body.targetLanguage : "en"
+        );
+        const session = await createRealtimeTranslationClientSecret(sourceLanguage, targetLanguage);
+        logRuntime("realtimeTranslation.session", {
+          status: session.status,
+          targetLanguage,
+          model: process.env.OPENAI_REALTIME_TRANSLATION_MODEL ?? "gpt-realtime-translate"
+        });
+        sendJson(res, session.status, session.body);
         return;
       }
 

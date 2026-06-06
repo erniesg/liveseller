@@ -50,6 +50,10 @@ const languageOptions: Array<{ code: LanguageCode; label: string; speechCode: st
   { code: "ms", label: "Malay", speechCode: "ms-MY" },
   { code: "ta", label: "Tamil", speechCode: "ta-IN" }
 ];
+const interimTranslationDelayMs = 450;
+const recognitionRestartDelayMs = 180;
+const realtimeCaptionMaxChars = 42;
+const realtimeCaptionMaxWords = 7;
 
 export function formatCountdown(endsAt: string, now = new Date()): string {
   const remainingMs = Math.max(0, new Date(endsAt).getTime() - now.getTime());
@@ -93,6 +97,53 @@ async function clearRuntimeCaptions(runtimeBaseUrl: string): Promise<OverlayStat
   return (await response.json()) as OverlayState;
 }
 
+function extractRealtimeClientSecret(body: unknown): string | undefined {
+  if (body && typeof body === "object" && "value" in body && typeof body.value === "string") {
+    return body.value;
+  }
+
+  if (
+    body &&
+    typeof body === "object" &&
+    "client_secret" in body &&
+    body.client_secret &&
+    typeof body.client_secret === "object" &&
+    "value" in body.client_secret &&
+    typeof body.client_secret.value === "string"
+  ) {
+    return body.client_secret.value;
+  }
+
+  return undefined;
+}
+
+async function createRealtimeTranslationSession(
+  runtimeBaseUrl: string,
+  sourceLanguage: LanguageCode,
+  targetLanguage: LanguageCode
+): Promise<string> {
+  const response = await fetch(`${runtimeBaseUrl}/api/runtime/realtime-translation/session`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sourceLanguage, targetLanguage })
+  });
+  const body = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      body && typeof body === "object" && "message" in body && typeof body.message === "string"
+        ? body.message
+        : `Realtime translation session failed with HTTP ${response.status}`
+    );
+  }
+
+  const clientSecret = extractRealtimeClientSecret(body);
+  if (!clientSecret) {
+    throw new Error("Realtime translation session returned no client secret");
+  }
+  return clientSecret;
+}
+
 function HostLiveControls({
   runtimeBaseUrl,
   onState,
@@ -107,15 +158,209 @@ function HostLiveControls({
   const [isListening, setIsListening] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [manualText, setManualText] = useState("");
+  const [audioEnabled, setAudioEnabled] = useState(true);
   const [logs, setLogs] = useState<string[]>([]);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const requestSeqRef = useRef(0);
   const activeSeqRef = useRef(0);
+  const shouldListenRef = useRef(false);
+  const interimTranslationTimerRef = useRef<number | null>(null);
+  const recognitionRestartTimerRef = useRef<number | null>(null);
+  const lastSpokenSeqRef = useRef(0);
+  const realtimePeerRef = useRef<RTCPeerConnection | null>(null);
+  const realtimeStreamRef = useRef<MediaStream | null>(null);
+  const realtimeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const realtimeSourceTranscriptRef = useRef("");
+  const realtimeTranscriptRef = useRef("");
+  const realtimeStartedAtRef = useRef(0);
+  const realtimeConnectedAtRef = useRef(0);
+  const firstRealtimeInputDeltaAtRef = useRef(0);
+  const firstRealtimeInputDeltaSeenRef = useRef(false);
+  const firstRealtimeOutputDeltaSeenRef = useRef(false);
+
+  function liveCaptionWindow(text: string) {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    if (normalized.length <= realtimeCaptionMaxChars) {
+      return normalized;
+    }
+
+    const words = normalized.split(" ");
+    if (words.length > realtimeCaptionMaxWords) {
+      return words.slice(-realtimeCaptionMaxWords).join(" ");
+    }
+
+    return normalized.slice(-realtimeCaptionMaxChars).replace(/^[,.;:!?，。！？、\s]+/, "");
+  }
 
   function logHost(event: string, details: Record<string, unknown> = {}) {
     const message = `${new Date().toLocaleTimeString()} ${event} ${JSON.stringify(details)}`;
     console.log(`[overlay:${event}]`, details);
     setLogs((previous) => [message, ...previous].slice(0, 6));
+  }
+
+  function cancelInterimTranslation() {
+    if (interimTranslationTimerRef.current !== null) {
+      window.clearTimeout(interimTranslationTimerRef.current);
+      interimTranslationTimerRef.current = null;
+    }
+  }
+
+  function cancelRecognitionRestart() {
+    if (recognitionRestartTimerRef.current !== null) {
+      window.clearTimeout(recognitionRestartTimerRef.current);
+      recognitionRestartTimerRef.current = null;
+    }
+  }
+
+  function stopRealtimeTranslation() {
+    realtimePeerRef.current?.close();
+    realtimePeerRef.current = null;
+    realtimeStreamRef.current?.getTracks().forEach((track) => track.stop());
+    realtimeStreamRef.current = null;
+    if (realtimeAudioRef.current) {
+      realtimeAudioRef.current.pause();
+      realtimeAudioRef.current.srcObject = null;
+      realtimeAudioRef.current.remove();
+      realtimeAudioRef.current = null;
+    }
+    realtimeSourceTranscriptRef.current = "";
+    realtimeTranscriptRef.current = "";
+    realtimeConnectedAtRef.current = 0;
+    firstRealtimeInputDeltaAtRef.current = 0;
+    firstRealtimeInputDeltaSeenRef.current = false;
+    firstRealtimeOutputDeltaSeenRef.current = false;
+  }
+
+  function attachTranslatedAudio(remoteStream: MediaStream) {
+    if (!realtimeAudioRef.current) {
+      const translatedAudio = document.createElement("audio");
+      translatedAudio.autoplay = true;
+      translatedAudio.controls = false;
+      translatedAudio.setAttribute("playsinline", "true");
+      translatedAudio.style.display = "none";
+      document.body.append(translatedAudio);
+      realtimeAudioRef.current = translatedAudio;
+    }
+
+    const translatedAudio = realtimeAudioRef.current;
+    translatedAudio.muted = !audioEnabled;
+    translatedAudio.volume = audioEnabled ? 1 : 0;
+    translatedAudio.srcObject = remoteStream;
+    void translatedAudio.play().catch(() => {
+      logHost("realtime.audio_play_blocked");
+    });
+    logHost("realtime.audio_track", {
+      mode: "audio_element",
+      muted: translatedAudio.muted,
+      volume: translatedAudio.volume
+    });
+  }
+
+  function syncRealtimeAudioEnabled(enabled: boolean) {
+    if (realtimeAudioRef.current) {
+      realtimeAudioRef.current.muted = !enabled;
+      realtimeAudioRef.current.volume = enabled ? 1 : 0;
+    }
+  }
+
+  function elapsedRealtimeMs(fromTime: number) {
+    return fromTime > 0
+      ? Math.round(performance.now() - fromTime)
+      : undefined;
+  }
+
+  function applyRealtimeSourceTranscriptDelta(delta: string) {
+    realtimeSourceTranscriptRef.current += delta;
+    const sourceText = liveCaptionWindow(realtimeSourceTranscriptRef.current);
+    if (!sourceText) {
+      return;
+    }
+
+    if (!firstRealtimeInputDeltaSeenRef.current) {
+      firstRealtimeInputDeltaSeenRef.current = true;
+      firstRealtimeInputDeltaAtRef.current = performance.now();
+      logHost("realtime.input_delta_first", {
+        sinceStartMs: elapsedRealtimeMs(realtimeStartedAtRef.current),
+        sinceConnectedMs: elapsedRealtimeMs(realtimeConnectedAtRef.current),
+        textLength: delta.length
+      });
+    }
+
+    onState((previous) => ({
+      ...previous,
+      caption: {
+        text: sourceText,
+        language: sourceLanguage,
+        visible: true
+      },
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  function applyRealtimeTranscriptDelta(delta: string) {
+    realtimeTranscriptRef.current += delta;
+    const translatedText = liveCaptionWindow(realtimeTranscriptRef.current);
+    if (!translatedText) {
+      return;
+    }
+
+    if (!firstRealtimeOutputDeltaSeenRef.current) {
+      firstRealtimeOutputDeltaSeenRef.current = true;
+      logHost("realtime.output_delta_first", {
+        sinceStartMs: elapsedRealtimeMs(realtimeStartedAtRef.current),
+        sinceConnectedMs: elapsedRealtimeMs(realtimeConnectedAtRef.current),
+        sinceFirstInputMs: elapsedRealtimeMs(firstRealtimeInputDeltaAtRef.current),
+        textLength: delta.length
+      });
+    }
+
+    onState((previous) => ({
+      ...previous,
+      caption: {
+        text: liveCaptionWindow(realtimeSourceTranscriptRef.current) || "Realtime translation active",
+        language: sourceLanguage,
+        visible: true
+      },
+      translatedCaptions: [
+        {
+          language: targetLanguage,
+          text: translatedText
+        }
+      ],
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  function targetSpeechCode() {
+    return languageOptions.find((language) => language.code === targetLanguage)?.speechCode ?? "en-SG";
+  }
+
+  function speakTranslatedAudio(nextState: OverlayState, requestSeq: number, phase: "interim" | "final" | "manual") {
+    if (!audioEnabled || requestSeq <= lastSpokenSeqRef.current || typeof window.speechSynthesis === "undefined") {
+      return;
+    }
+
+    const translatedCaption = nextState.translatedCaptions.find(
+      (caption) => caption.language === targetLanguage
+    );
+    if (!translatedCaption?.text.trim() || typeof SpeechSynthesisUtterance === "undefined") {
+      logHost("audio.unavailable", { requestSeq, phase });
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(translatedCaption.text.trim());
+    utterance.lang = targetSpeechCode();
+    utterance.rate = 1.04;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+    lastSpokenSeqRef.current = requestSeq;
+    logHost("audio.speak", {
+      requestSeq,
+      phase,
+      targetLanguage,
+      textLength: translatedCaption.text.length
+    });
   }
 
   function clearLocalCaptions() {
@@ -134,6 +379,7 @@ function HostLiveControls({
 
   async function clearCaptions() {
     requestSeqRef.current += 1;
+    cancelInterimTranslation();
     clearLocalCaptions();
     try {
       onState(await clearRuntimeCaptions(runtimeBaseUrl));
@@ -144,7 +390,7 @@ function HostLiveControls({
     }
   }
 
-  async function sendTranscript(text: string) {
+  async function sendTranscript(text: string, phase: "interim" | "final" | "manual" = "final") {
     if (!text.trim()) {
       return;
     }
@@ -162,9 +408,10 @@ function HostLiveControls({
       translatedCaptions: [],
       updatedAt: new Date().toISOString()
     }));
-    setStatus("Translating");
+    setStatus(phase === "interim" ? "Translating partial" : "Translating");
     logHost("transcript.request", {
       requestSeq,
+      phase,
       sourceLanguage,
       targetLanguage,
       textLength: transcript.length
@@ -183,12 +430,35 @@ function HostLiveControls({
       return;
     }
     onState(nextState);
+    speakTranslatedAudio(nextState, requestSeq, phase);
     setStatus("Live");
     logHost("transcript.response", {
       requestSeq,
+      phase,
       ms: Math.round(performance.now() - startedAt),
       translations: nextState.translatedCaptions.map((caption) => caption.language)
     });
+  }
+
+  function showInterimTranscript(transcript: string) {
+    onState((previous) => ({
+      ...previous,
+      caption: {
+        text: transcript,
+        language: sourceLanguage,
+        visible: true
+      },
+      translatedCaptions: [],
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  function queueInterimTranslation(transcript: string) {
+    cancelInterimTranslation();
+    interimTranslationTimerRef.current = window.setTimeout(() => {
+      interimTranslationTimerRef.current = null;
+      void sendTranscript(transcript, "interim").catch(() => setStatus("Runtime error"));
+    }, interimTranslationDelayMs);
   }
 
   useEffect(() => {
@@ -200,17 +470,20 @@ function HostLiveControls({
   useEffect(() => {
     recognitionRef.current?.stop();
     recognitionRef.current = null;
+    stopRealtimeTranslation();
     setIsListening(false);
+    shouldListenRef.current = false;
+    cancelRecognitionRestart();
     onActiveChange(false);
     setManualText("");
     void clearCaptions();
   }, [sourceLanguage, targetLanguage]);
 
-  function startListening() {
+  function createRecognition(sessionSeq: number) {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!Recognition) {
       setStatus("Speech recognition unavailable");
-      return;
+      return null;
     }
 
     const recognition = new Recognition();
@@ -229,19 +502,13 @@ function HostLiveControls({
           continue;
         }
         if (result.isFinal) {
+          cancelInterimTranslation();
           logHost("speech.final", { textLength: transcript.length });
-          void sendTranscript(transcript).catch(() => setStatus("Runtime error"));
+          void sendTranscript(transcript, "final").catch(() => setStatus("Runtime error"));
         } else {
-          onState((previous) => ({
-            ...previous,
-            caption: {
-              text: transcript,
-              language: sourceLanguage,
-              visible: true
-            },
-            translatedCaptions: [],
-            updatedAt: new Date().toISOString()
-          }));
+          showInterimTranscript(transcript);
+          queueInterimTranslation(transcript);
+          setStatus("Listening");
           logHost("speech.interim", { textLength: transcript.length });
         }
       }
@@ -250,32 +517,159 @@ function HostLiveControls({
       logHost("speech.error");
       setStatus("Mic error");
     };
+    recognition.onend = () => {
+      if (activeSeqRef.current !== sessionSeq) {
+        return;
+      }
+      if (shouldListenRef.current) {
+        setStatus("Restarting mic");
+        cancelRecognitionRestart();
+        recognitionRestartTimerRef.current = window.setTimeout(() => {
+          if (shouldListenRef.current && activeSeqRef.current === sessionSeq) {
+            const nextRecognition = createRecognition(sessionSeq);
+            if (!nextRecognition) {
+              setIsListening(false);
+              onActiveChange(false);
+              return;
+            }
+            recognitionRef.current = nextRecognition;
+            nextRecognition.start();
+            setStatus("Listening");
+            logHost("speech.restart", { sessionSeq });
+          }
+        }, recognitionRestartDelayMs);
+        return;
+      }
+      setIsListening(false);
+      onActiveChange(false);
+      cancelInterimTranslation();
+      logHost("speech.end", { sessionSeq });
+    };
+    return recognition;
+  }
+
+  async function startListening() {
+    if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === "undefined") {
+      setStatus("Realtime audio unavailable");
+      logHost("realtime.unavailable");
+      return;
+    }
+
+    cancelRecognitionRestart();
+    shouldListenRef.current = true;
     const sessionSeq = activeSeqRef.current + 1;
     activeSeqRef.current = sessionSeq;
-    recognition.onend = () => {
-      if (activeSeqRef.current === sessionSeq) {
-        setIsListening(false);
-        onActiveChange(false);
-        logHost("speech.end", { sessionSeq });
-      }
-    };
     void clearCaptions();
-    recognition.start();
-    recognitionRef.current = recognition;
     setIsListening(true);
     onActiveChange(true);
-    setStatus("Listening");
-    logHost("speech.start", {
+    setStatus("Connecting realtime");
+    logHost("realtime.start", {
       sourceLanguage,
       targetLanguage,
-      speechCode: recognition.lang,
       sessionSeq
     });
+    realtimeStartedAtRef.current = performance.now();
+
+    try {
+      const sourceStreamPromise = navigator.mediaDevices.getUserMedia({
+        audio: {
+          autoGainControl: false,
+          echoCancellation: false,
+          latency: { ideal: 0 },
+          noiseSuppression: false
+        } as MediaTrackConstraints
+      });
+      const clientSecretPromise = createRealtimeTranslationSession(runtimeBaseUrl, sourceLanguage, targetLanguage);
+      const [clientSecret, sourceStream] = await Promise.all([clientSecretPromise, sourceStreamPromise]);
+      if (!shouldListenRef.current || activeSeqRef.current !== sessionSeq) {
+        sourceStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      realtimeStreamRef.current = sourceStream;
+
+      const peer = new RTCPeerConnection();
+      realtimePeerRef.current = peer;
+      const audioTrack = sourceStream.getAudioTracks()[0];
+      if (audioTrack) {
+        peer.addTrack(audioTrack, sourceStream);
+      }
+
+      peer.ontrack = ({ streams }) => {
+        const remoteStream = streams[0];
+        if (!remoteStream) {
+          logHost("realtime.audio_track_missing");
+          return;
+        }
+        attachTranslatedAudio(remoteStream);
+      };
+
+      const events = peer.createDataChannel("oai-events");
+      events.onmessage = ({ data }) => {
+        try {
+          const event = JSON.parse(String(data)) as { type?: string; delta?: unknown };
+          if (
+            event.type === "input_audio_buffer.speech_started" ||
+            event.type === "input_audio_buffer.speech_stopped"
+          ) {
+            logHost(event.type, {
+              sinceConnectedMs: elapsedRealtimeMs(realtimeConnectedAtRef.current)
+            });
+          }
+          if (event.type === "session.input_transcript.delta" && typeof event.delta === "string") {
+            applyRealtimeSourceTranscriptDelta(event.delta);
+          }
+          if (event.type === "session.output_transcript.delta" && typeof event.delta === "string") {
+            applyRealtimeTranscriptDelta(event.delta);
+          }
+        } catch {
+          logHost("realtime.event_parse_failed");
+        }
+      };
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      const sdpResponse = await fetch("https://api.openai.com/v1/realtime/translations/calls", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${clientSecret}`,
+          "content-type": "application/sdp"
+        },
+        body: offer.sdp
+      });
+      if (!sdpResponse.ok) {
+        throw new Error(await sdpResponse.text());
+      }
+      await peer.setRemoteDescription({
+        type: "answer",
+        sdp: await sdpResponse.text()
+      });
+      realtimeConnectedAtRef.current = performance.now();
+      setStatus("Speak now");
+      logHost("realtime.connected", { targetLanguage });
+      logHost("realtime.ready_to_speak", {
+        sinceStartMs: elapsedRealtimeMs(realtimeStartedAtRef.current)
+      });
+    } catch (error) {
+      stopRealtimeTranslation();
+      shouldListenRef.current = false;
+      setIsListening(false);
+      onActiveChange(false);
+      setStatus("Realtime error");
+      logHost("realtime.error", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   function stopListening() {
     activeSeqRef.current += 1;
     requestSeqRef.current += 1;
+    shouldListenRef.current = false;
+    cancelInterimTranslation();
+    cancelRecognitionRestart();
+    stopRealtimeTranslation();
+    window.speechSynthesis?.cancel();
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setIsListening(false);
@@ -286,7 +680,7 @@ function HostLiveControls({
   }
 
   function submitManualTranscript() {
-    void sendTranscript(manualText).catch(() => setStatus("Runtime error"));
+    void sendTranscript(manualText, "manual").catch(() => setStatus("Runtime error"));
   }
 
   return (
@@ -319,6 +713,21 @@ function HostLiveControls({
         {isListening ? "Stop" : "Start"}
       </button>
       <span>{status}</span>
+      <label className="audio-toggle">
+        <input
+          aria-label="Translated audio"
+          checked={audioEnabled}
+          type="checkbox"
+          onChange={(event) => {
+            setAudioEnabled(event.target.checked);
+            syncRealtimeAudioEnabled(event.target.checked);
+            if (!event.target.checked) {
+              window.speechSynthesis?.cancel();
+            }
+          }}
+        />
+        Audio
+      </label>
       <input
         aria-label="Manual transcript"
         placeholder="Type transcript"
