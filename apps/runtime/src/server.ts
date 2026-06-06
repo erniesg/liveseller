@@ -90,7 +90,7 @@ function logRuntime(event: string, details: Record<string, unknown>) {
   console.log(`[runtime:${event}] ${JSON.stringify(details)}`);
 }
 
-async function createRealtimeTranslationClientSecret(targetLanguage: LanguageCode) {
+async function createRealtimeTranslationClientSecret(sourceLanguage: LanguageCode, targetLanguage: LanguageCode) {
   if (!process.env.OPENAI_API_KEY) {
     return {
       status: 503,
@@ -112,6 +112,11 @@ async function createRealtimeTranslationClientSecret(targetLanguage: LanguageCod
       session: {
         model: process.env.OPENAI_REALTIME_TRANSLATION_MODEL ?? "gpt-realtime-translate",
         audio: {
+          input: {
+            transcription: {
+              model: process.env.OPENAI_REALTIME_TRANSCRIPTION_MODEL ?? "gpt-realtime-whisper"
+            }
+          },
           output: {
             language: targetLanguage
           }
@@ -235,10 +240,13 @@ export function createRuntimeServer() {
 
       if (req.method === "POST" && req.url === "/api/runtime/realtime-translation/session") {
         const body = await readJson(req);
+        const sourceLanguage = LanguageCodeSchema.parse(
+          typeof body.sourceLanguage === "string" ? body.sourceLanguage : "en"
+        );
         const targetLanguage = LanguageCodeSchema.parse(
           typeof body.targetLanguage === "string" ? body.targetLanguage : "en"
         );
-        const session = await createRealtimeTranslationClientSecret(targetLanguage);
+        const session = await createRealtimeTranslationClientSecret(sourceLanguage, targetLanguage);
         logRuntime("realtimeTranslation.session", {
           status: session.status,
           targetLanguage,

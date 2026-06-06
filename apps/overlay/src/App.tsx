@@ -52,6 +52,8 @@ const languageOptions: Array<{ code: LanguageCode; label: string; speechCode: st
 ];
 const interimTranslationDelayMs = 450;
 const recognitionRestartDelayMs = 180;
+const realtimeCaptionMaxChars = 42;
+const realtimeCaptionMaxWords = 7;
 
 export function formatCountdown(endsAt: string, now = new Date()): string {
   const remainingMs = Math.max(0, new Date(endsAt).getTime() - now.getTime());
@@ -117,12 +119,13 @@ function extractRealtimeClientSecret(body: unknown): string | undefined {
 
 async function createRealtimeTranslationSession(
   runtimeBaseUrl: string,
+  sourceLanguage: LanguageCode,
   targetLanguage: LanguageCode
 ): Promise<string> {
   const response = await fetch(`${runtimeBaseUrl}/api/runtime/realtime-translation/session`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ targetLanguage })
+    body: JSON.stringify({ sourceLanguage, targetLanguage })
   });
   const body = await response.json();
 
@@ -167,7 +170,27 @@ function HostLiveControls({
   const realtimePeerRef = useRef<RTCPeerConnection | null>(null);
   const realtimeStreamRef = useRef<MediaStream | null>(null);
   const realtimeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const realtimeSourceTranscriptRef = useRef("");
   const realtimeTranscriptRef = useRef("");
+  const realtimeStartedAtRef = useRef(0);
+  const realtimeConnectedAtRef = useRef(0);
+  const firstRealtimeInputDeltaAtRef = useRef(0);
+  const firstRealtimeInputDeltaSeenRef = useRef(false);
+  const firstRealtimeOutputDeltaSeenRef = useRef(false);
+
+  function liveCaptionWindow(text: string) {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    if (normalized.length <= realtimeCaptionMaxChars) {
+      return normalized;
+    }
+
+    const words = normalized.split(" ");
+    if (words.length > realtimeCaptionMaxWords) {
+      return words.slice(-realtimeCaptionMaxWords).join(" ");
+    }
+
+    return normalized.slice(-realtimeCaptionMaxChars).replace(/^[,.;:!?，。！？、\s]+/, "");
+  }
 
   function logHost(event: string, details: Record<string, unknown> = {}) {
     const message = `${new Date().toLocaleTimeString()} ${event} ${JSON.stringify(details)}`;
@@ -197,22 +220,104 @@ function HostLiveControls({
     if (realtimeAudioRef.current) {
       realtimeAudioRef.current.pause();
       realtimeAudioRef.current.srcObject = null;
+      realtimeAudioRef.current.remove();
       realtimeAudioRef.current = null;
     }
+    realtimeSourceTranscriptRef.current = "";
     realtimeTranscriptRef.current = "";
+    realtimeConnectedAtRef.current = 0;
+    firstRealtimeInputDeltaAtRef.current = 0;
+    firstRealtimeInputDeltaSeenRef.current = false;
+    firstRealtimeOutputDeltaSeenRef.current = false;
   }
 
-  function applyRealtimeTranscriptDelta(delta: string) {
-    realtimeTranscriptRef.current += delta;
-    const translatedText = realtimeTranscriptRef.current.trim();
-    if (!translatedText) {
+  function attachTranslatedAudio(remoteStream: MediaStream) {
+    if (!realtimeAudioRef.current) {
+      const translatedAudio = document.createElement("audio");
+      translatedAudio.autoplay = true;
+      translatedAudio.controls = false;
+      translatedAudio.setAttribute("playsinline", "true");
+      translatedAudio.style.display = "none";
+      document.body.append(translatedAudio);
+      realtimeAudioRef.current = translatedAudio;
+    }
+
+    const translatedAudio = realtimeAudioRef.current;
+    translatedAudio.muted = !audioEnabled;
+    translatedAudio.volume = audioEnabled ? 1 : 0;
+    translatedAudio.srcObject = remoteStream;
+    void translatedAudio.play().catch(() => {
+      logHost("realtime.audio_play_blocked");
+    });
+    logHost("realtime.audio_track", {
+      mode: "audio_element",
+      muted: translatedAudio.muted,
+      volume: translatedAudio.volume
+    });
+  }
+
+  function syncRealtimeAudioEnabled(enabled: boolean) {
+    if (realtimeAudioRef.current) {
+      realtimeAudioRef.current.muted = !enabled;
+      realtimeAudioRef.current.volume = enabled ? 1 : 0;
+    }
+  }
+
+  function elapsedRealtimeMs(fromTime: number) {
+    return fromTime > 0
+      ? Math.round(performance.now() - fromTime)
+      : undefined;
+  }
+
+  function applyRealtimeSourceTranscriptDelta(delta: string) {
+    realtimeSourceTranscriptRef.current += delta;
+    const sourceText = liveCaptionWindow(realtimeSourceTranscriptRef.current);
+    if (!sourceText) {
       return;
+    }
+
+    if (!firstRealtimeInputDeltaSeenRef.current) {
+      firstRealtimeInputDeltaSeenRef.current = true;
+      firstRealtimeInputDeltaAtRef.current = performance.now();
+      logHost("realtime.input_delta_first", {
+        sinceStartMs: elapsedRealtimeMs(realtimeStartedAtRef.current),
+        sinceConnectedMs: elapsedRealtimeMs(realtimeConnectedAtRef.current),
+        textLength: delta.length
+      });
     }
 
     onState((previous) => ({
       ...previous,
       caption: {
-        text: "Realtime translation active",
+        text: sourceText,
+        language: sourceLanguage,
+        visible: true
+      },
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  function applyRealtimeTranscriptDelta(delta: string) {
+    realtimeTranscriptRef.current += delta;
+    const translatedText = liveCaptionWindow(realtimeTranscriptRef.current);
+    if (!translatedText) {
+      return;
+    }
+
+    if (!firstRealtimeOutputDeltaSeenRef.current) {
+      firstRealtimeOutputDeltaSeenRef.current = true;
+      logHost("realtime.output_delta_first", {
+        sinceStartMs: elapsedRealtimeMs(realtimeStartedAtRef.current),
+        sinceConnectedMs: elapsedRealtimeMs(realtimeConnectedAtRef.current),
+        sinceFirstInputMs: elapsedRealtimeMs(firstRealtimeInputDeltaAtRef.current),
+        textLength: delta.length
+      });
+    }
+
+    onState((previous) => ({
+      ...previous,
+      caption: {
+        text: liveCaptionWindow(realtimeSourceTranscriptRef.current) || "Realtime translation active",
         language: sourceLanguage,
         visible: true
       },
@@ -463,14 +568,24 @@ function HostLiveControls({
       targetLanguage,
       sessionSeq
     });
+    realtimeStartedAtRef.current = performance.now();
 
     try {
-      const clientSecret = await createRealtimeTranslationSession(runtimeBaseUrl, targetLanguage);
+      const sourceStreamPromise = navigator.mediaDevices.getUserMedia({
+        audio: {
+          autoGainControl: false,
+          echoCancellation: false,
+          latency: { ideal: 0 },
+          noiseSuppression: false
+        } as MediaTrackConstraints
+      });
+      const clientSecretPromise = createRealtimeTranslationSession(runtimeBaseUrl, sourceLanguage, targetLanguage);
+      const [clientSecret, sourceStream] = await Promise.all([clientSecretPromise, sourceStreamPromise]);
       if (!shouldListenRef.current || activeSeqRef.current !== sessionSeq) {
+        sourceStream.getTracks().forEach((track) => track.stop());
         return;
       }
 
-      const sourceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       realtimeStreamRef.current = sourceStream;
 
       const peer = new RTCPeerConnection();
@@ -480,22 +595,30 @@ function HostLiveControls({
         peer.addTrack(audioTrack, sourceStream);
       }
 
-      const translatedAudio = new Audio();
-      translatedAudio.autoplay = true;
-      translatedAudio.muted = !audioEnabled;
-      realtimeAudioRef.current = translatedAudio;
       peer.ontrack = ({ streams }) => {
-        translatedAudio.srcObject = streams[0] ?? null;
-        void translatedAudio.play().catch(() => {
-          logHost("realtime.audio_play_blocked");
-        });
-        logHost("realtime.audio_track");
+        const remoteStream = streams[0];
+        if (!remoteStream) {
+          logHost("realtime.audio_track_missing");
+          return;
+        }
+        attachTranslatedAudio(remoteStream);
       };
 
       const events = peer.createDataChannel("oai-events");
       events.onmessage = ({ data }) => {
         try {
           const event = JSON.parse(String(data)) as { type?: string; delta?: unknown };
+          if (
+            event.type === "input_audio_buffer.speech_started" ||
+            event.type === "input_audio_buffer.speech_stopped"
+          ) {
+            logHost(event.type, {
+              sinceConnectedMs: elapsedRealtimeMs(realtimeConnectedAtRef.current)
+            });
+          }
+          if (event.type === "session.input_transcript.delta" && typeof event.delta === "string") {
+            applyRealtimeSourceTranscriptDelta(event.delta);
+          }
           if (event.type === "session.output_transcript.delta" && typeof event.delta === "string") {
             applyRealtimeTranscriptDelta(event.delta);
           }
@@ -521,8 +644,12 @@ function HostLiveControls({
         type: "answer",
         sdp: await sdpResponse.text()
       });
-      setStatus("Realtime live");
+      realtimeConnectedAtRef.current = performance.now();
+      setStatus("Speak now");
       logHost("realtime.connected", { targetLanguage });
+      logHost("realtime.ready_to_speak", {
+        sinceStartMs: elapsedRealtimeMs(realtimeStartedAtRef.current)
+      });
     } catch (error) {
       stopRealtimeTranslation();
       shouldListenRef.current = false;
@@ -593,9 +720,7 @@ function HostLiveControls({
           type="checkbox"
           onChange={(event) => {
             setAudioEnabled(event.target.checked);
-            if (realtimeAudioRef.current) {
-              realtimeAudioRef.current.muted = !event.target.checked;
-            }
+            syncRealtimeAudioEnabled(event.target.checked);
             if (!event.target.checked) {
               window.speechSynthesis?.cancel();
             }

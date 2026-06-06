@@ -46,7 +46,7 @@ describe("public overlay", () => {
       },
       translatedCaptions: []
     };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/api/runtime/realtime-translation/session")) {
         return new Response(JSON.stringify({ value: "ephemeral-client-secret" }), {
@@ -80,12 +80,25 @@ describe("public overlay", () => {
     const audioPlayMock = vi.fn(async () => undefined);
     class FakeAudio {
       autoplay = false;
+      controls = false;
       muted = false;
+      style = { display: "" };
       srcObject: unknown = null;
+      volume = 1;
       pause = vi.fn();
       play = audioPlayMock;
+      remove = vi.fn();
+      setAttribute = vi.fn();
     }
-    vi.stubGlobal("Audio", FakeAudio);
+    const audioElement = new FakeAudio();
+    const appendMock = vi.spyOn(document.body, "append").mockImplementation(() => undefined);
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      if (tagName === "audio") {
+        return audioElement as unknown as HTMLElement;
+      }
+      return originalCreateElement(tagName);
+    });
 
     let dataChannel:
       | {
@@ -135,12 +148,40 @@ describe("public overlay", () => {
       ).toHaveLength(1);
     });
     expect(peer?.addTrack).toHaveBeenCalledWith(localTrack, localStream);
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        autoGainControl: false,
+        echoCancellation: false,
+        latency: { ideal: 0 },
+        noiseSuppression: false
+      }
+    });
+    const sessionRequest = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith("/api/runtime/realtime-translation/session")
+    );
+    expect(JSON.parse(String(sessionRequest?.[1]?.body))).toEqual({
+      sourceLanguage: "en",
+      targetLanguage: "ms"
+    });
     expect(peer?.setRemoteDescription).toHaveBeenCalledWith({
       type: "answer",
       sdp: "answer-sdp"
     });
+    expect(screen.getByText("Speak now")).toBeInTheDocument();
 
     act(() => {
+      dataChannel?.onmessage?.({
+        data: JSON.stringify({
+          type: "session.input_transcript.delta",
+          delta: "Hello "
+        })
+      });
+      dataChannel?.onmessage?.({
+        data: JSON.stringify({
+          type: "session.input_transcript.delta",
+          delta: "live"
+        })
+      });
       dataChannel?.onmessage?.({
         data: JSON.stringify({
           type: "session.output_transcript.delta",
@@ -156,7 +197,34 @@ describe("public overlay", () => {
       peer?.ontrack?.({ streams: [{ id: "remote-translated-audio" }] });
     });
 
+    expect(screen.getByText("Hello live")).toBeInTheDocument();
     expect(screen.getByText("Helo siaran langsung")).toBeInTheDocument();
+    expect(appendMock).toHaveBeenCalledWith(audioElement);
+    expect(audioElement).toMatchObject({
+      autoplay: true,
+      muted: false,
+      srcObject: { id: "remote-translated-audio" },
+      volume: 1
+    });
+    expect(audioElement.setAttribute).toHaveBeenCalledWith("playsinline", "true");
     expect(audioPlayMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByLabelText("Translated audio"));
+    expect(audioElement).toMatchObject({
+      muted: true,
+      volume: 0
+    });
+
+    act(() => {
+      dataChannel?.onmessage?.({
+        data: JSON.stringify({
+          type: "session.output_transcript.delta",
+          delta: ". Ini terjemahan yang lebih baru untuk diselaraskan dengan audio langsung"
+        })
+      });
+    });
+
+    expect(screen.queryByText("Helo siaran langsung")).not.toBeInTheDocument();
+    expect(screen.getByText("lebih baru untuk diselaraskan dengan audio langsung")).toBeInTheDocument();
   });
 });
