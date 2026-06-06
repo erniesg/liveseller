@@ -38,6 +38,8 @@ This is the operating plan for the SEAxOpenAI 5-hour build. `main` must stay usa
 
 ### Jiayi: Chrome Extension
 
+Use `docs/jodisw-ui-context.md` as the implementation-facing UI and product context for this lane.
+
 Done by T+2:45:
 
 - Content script can convert a viewer DOM row into `RuntimeEvent.viewer_chat`.

@@ -18,6 +18,7 @@ The timeboxed owner/checkpoint plan for the 5-hour build lives in `docs/5-hour-h
   - Server-owned runtime, policy gates, event routing, memory, fake adapters, approvals, audit, captions, translations, recommendations.
 - Lane 3: Commerce Adapter + Demo Surfaces
   - Shopee UI audit, Chrome extension, content script, side panel, public overlay, mock stream, real-tab proof.
+  - JodisW's extension UI and real-tab context is in `docs/jodisw-ui-context.md`.
 
 ## Execution Defaults
 

@@ -51,6 +51,8 @@ npm run demo:runtime
 
 ## Lane 3: Commerce Adapter + Demo Surfaces
 
+For JodisW's extension UI scope, product context, side-panel states, and real-tab proof checklist, use `docs/jodisw-ui-context.md`.
+
 Done when:
 
 - Overlay renders product, promo, countdown, quantity, and multilingual captions.

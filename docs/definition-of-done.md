@@ -34,6 +34,7 @@ A change is done only when:
 
 ## Lane 3 Done
 
+- JodisW-specific extension UI context in `docs/jodisw-ui-context.md` is followed for product facts, side-panel states, command safety, and real-tab proof.
 - Overlay renders without layout breakage for long English, Chinese, Malay, and Tamil captions.
 - Extension command execution is deterministic.
 - Seller typing is not overwritten.
