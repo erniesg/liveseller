@@ -19,6 +19,7 @@ const state = {
   viewerUrl: "",
   queuedProductCreation: [],
   productCreationFilled: false,
+  productEvents: [],
   realtimeAgentConnected: false,
   realtimeToolCalls: [],
   sellerTimelineEvents: [],
@@ -91,6 +92,35 @@ function setConnection(label, kind = "") {
 function writeLog(selector, value) {
   const node = $(selector);
   node.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function renderProductEvents() {
+  const root = $("#product-event-log");
+  root.replaceChildren();
+  if (state.productEvents.length === 0) {
+    root.textContent = "No activity yet.";
+    return;
+  }
+  for (const event of state.productEvents.slice(0, 20)) {
+    const row = document.createElement("div");
+    row.className = `activity-row ${event.status || "info"}`;
+    row.innerHTML = `
+      <strong>${escapeHtml(event.title)}</strong>
+      <span>${escapeHtml(event.detail || "")}</span>
+      <span>${escapeHtml(event.timestamp)}</span>
+    `;
+    root.append(row);
+  }
+}
+
+function appendProductEvent(title, detail = "", status = "info") {
+  state.productEvents = [{
+    title,
+    detail,
+    status,
+    timestamp: new Date().toLocaleTimeString()
+  }, ...state.productEvents].slice(0, 40);
+  renderProductEvents();
 }
 
 function escapeHtml(value) {
@@ -609,6 +639,7 @@ function addIntakeFiles(files) {
   resetLiveSessionState();
   state.queuedProductCreation = [];
   state.productCreationFilled = false;
+  appendProductEvent("Images loaded", `${images.length} image(s) ready for generation.`);
   intakeImages.push(...images.map((file) => ({
     file,
     name: file.name,
@@ -742,6 +773,7 @@ async function createIntakeReviewDraft() {
   $("#product-step-status").textContent = "Codex app-server is processing product photos into a reviewable plan...";
   $("#create-intake-review").disabled = true;
   $("#create-intake-review").textContent = "Processing...";
+  appendProductEvent("Generation started", `Sending ${intakeImages.length} image(s) to Codex app-server.`);
   writeDraftFields({});
   const startedAt = Date.now();
   try {
@@ -782,6 +814,7 @@ async function createIntakeReviewDraft() {
       imageCount: intakeImages.length,
       note: "Approve the app-server review plan to let Codex build create_product commands."
     });
+    appendProductEvent("Product plan generated", `${state.reviewPlan?.items?.length || 0} product plan(s) returned.`, "success");
     $("#product-step-status").textContent = `Codex app-server generated ${state.reviewPlan?.items?.length || 0} product plan(s). Edit or approve for Shopee.`;
   } catch (error) {
     state.reviewPlan = undefined;
@@ -792,9 +825,7 @@ async function createIntakeReviewDraft() {
     resetLiveSessionState();
     renderReviewPlan();
     renderCommands();
-    if (decision.status === "approved" || decision.status === "edited") {
-      void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message));
-    }
+    appendProductEvent("Generation failed", error instanceof Error ? error.message : String(error), "error");
     writeLog("#intake-log", {
       status: "operator_generation_failed",
       error: error instanceof Error ? error.message : String(error),
@@ -856,6 +887,7 @@ function clearIntake() {
   state.productCreationFilled = false;
   renderIntake();
   renderCommands();
+  appendProductEvent("Product flow cleared", "Upload images to start again.");
   $("#product-step-status").textContent = "Drop images, generate a product plan, then approve when it is ready for Shopee.";
   writeLog("#intake-log", "Drop images to begin.");
 }
@@ -970,7 +1002,8 @@ async function submitDecision(card, item, status) {
       createProductCommandCount: state.createProductCommands.length,
       productId: decision.productId
     });
-    void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message));
+    appendProductEvent("Product approved", `${decision.productId}; ${state.createProductCommands.length} create command(s) ready.`, "success");
+    void queueShopeeProductCreation({ autoSubmit: true }).catch((error) => writeLog("#product-creation-log", error.message));
     return;
   }
 
@@ -990,18 +1023,63 @@ async function submitDecision(card, item, status) {
   renderReviewPlan();
   renderCommands();
   if (decision.status === "approved" || decision.status === "edited") {
-    void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message));
+    void queueShopeeProductCreation({ autoSubmit: true }).catch((error) => writeLog("#product-creation-log", error.message));
   }
 }
 
 async function approveAll() {
-  for (const item of [...currentItems()]) {
+  const pending = currentItems().filter((item) =>
+    item.decision.status !== "approved" && item.decision.status !== "edited" && item.decision.status !== "rejected"
+  );
+  if (pending.length === 0) {
+    appendProductEvent("Approve all skipped", "No pending products to approve.");
+    return;
+  }
+  appendProductEvent("Approve all started", `${pending.length} product(s) sent to Codex operator.`);
+
+  if (state.reviewPlanSource === "operator" && state.reviewPlan) {
+    const decisions = pending.map((item) => {
+      const card = document.querySelector(`[data-product-id="${item.productId}"]`);
+      return buildDecision(card, item, "approved");
+    });
+    const calls = decisions.flatMap((decision) => [
+      {
+        tool: "liveseller_record_product_review_decision",
+        arguments: { decision }
+      }
+    ]);
+    calls.push({
+      tool: "liveseller_build_create_product_commands",
+      arguments: {}
+    });
+    const response = await fetchOperatorJson("/api/operator/review-tools", {
+      method: "POST",
+      body: JSON.stringify({
+        reviewPlan: state.reviewPlan,
+        createProductCommands: state.createProductCommands,
+        calls
+      })
+    });
+    state.reviewPlan = response.reviewPlan;
+    state.reviewPlanSource = "operator";
+    state.createProductCommands = response.createProductCommands || [];
+    state.startLivestreamCommands = response.startLivestreamCommands || [];
+    resetLiveSessionState();
+    state.queuedProductCreation = [];
+    state.productCreationFilled = false;
+    renderReviewPlan();
+    renderCommands();
+    appendProductEvent("Approve all complete", `${state.createProductCommands.length} Shopee create command(s) ready.`, "success");
+    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true });
+    return;
+  }
+
+  for (const item of pending) {
     const latest = currentItems().find((candidate) => candidate.productId === item.productId);
-    if (!latest || latest.decision.status === "approved" || latest.decision.status === "edited") {
-      continue;
+    const card = latest ? document.querySelector(`[data-product-id="${latest.productId}"]`) : undefined;
+    if (latest && card) {
+      await submitDecision(card, latest, "approved");
     }
-    const card = document.querySelector(`[data-product-id="${latest.productId}"]`);
-    await submitDecision(card, latest, "approved");
   }
 }
 
@@ -1567,16 +1645,18 @@ async function sendLowRiskReplyThroughShopeeTab() {
   });
 }
 
-async function queueShopeeProductCreation() {
+async function queueShopeeProductCreation(options = {}) {
   const approvedCommands = state.createProductCommands.filter((command) =>
     command.kind === "create_product" &&
     (command.approvalStatus === "approved" || command.approvalStatus === "edited")
   );
   if (approvedCommands.length === 0) {
     writeLog("#product-creation-log", "No approved create_product command is available.");
+    appendProductEvent("Shopee creation skipped", "No approved create_product command is available.", "error");
     return;
   }
   const command = approvedCommands[0];
+  appendProductEvent("Shopee fill started", command.payload?.product?.title || command.productId);
   state.queuedProductCreation = [{
     commandId: command.commandId,
     productId: command.productId,
@@ -1591,12 +1671,22 @@ async function queueShopeeProductCreation() {
     });
     state.productCreationFilled = Boolean(response?.ok);
     renderCommands();
+    appendProductEvent(
+      response?.ok ? "Shopee form filled" : "Shopee fill failed",
+      response?.ok
+        ? `${response.evidence?.filled?.join(", ") || "fields"}; images ${response.evidence?.uploadedImages?.count || 0}`
+        : response?.error || response?.evidence?.error || response?.status || "Shopee did not accept the fill.",
+      response?.ok ? "success" : "error"
+    );
     writeLog("#product-creation-log", {
       status: response?.ok ? "filled_authenticated_shopee_product_form" : "queue_recorded_side_panel_only",
       commands: state.queuedProductCreation,
       remainingApprovedCommands: Math.max(approvedCommands.length - 1, 0),
       result: response
     });
+    if (response?.ok && options.autoSubmit) {
+      await confirmShopeeProductPublish({ continueQueue: options.continueQueue === true });
+    }
     void refreshSellerTimeline().catch(() => undefined);
     return;
   }
@@ -1606,11 +1696,12 @@ async function queueShopeeProductCreation() {
     remainingApprovedCommands: Math.max(approvedCommands.length - 1, 0),
     note: "Chrome extension runtime is required to execute inside an authenticated Shopee seller tab."
   });
+  appendProductEvent("Shopee fill queued locally", "Chrome extension runtime is required to execute in the seller tab.", "error");
   renderCommands();
   void refreshSellerTimeline().catch(() => undefined);
 }
 
-async function confirmShopeeProductPublish() {
+async function confirmShopeeProductPublish(options = {}) {
   const queuedCommandIds = new Set(state.queuedProductCreation.map((command) => command.commandId));
   const approvedCommands = state.createProductCommands.filter((command) =>
     command.kind === "create_product" &&
@@ -1619,10 +1710,12 @@ async function confirmShopeeProductPublish() {
   );
   if (approvedCommands.length === 0) {
     writeLog("#product-creation-log", "Fill one approved Shopee product listing before confirming Save and Publish.");
+    appendProductEvent("Publish skipped", "Fill one approved Shopee product listing before confirming Save and Publish.", "error");
     return;
   }
   if (!globalThis.chrome?.runtime?.sendMessage) {
     writeLog("#product-creation-log", "Chrome extension runtime is required to press Shopee Save and Publish.");
+    appendProductEvent("Publish skipped", "Chrome extension runtime is required to press Shopee Save and Publish.", "error");
     return;
   }
   const response = await chrome.runtime.sendMessage({
@@ -1631,6 +1724,9 @@ async function confirmShopeeProductPublish() {
   });
   state.createProductExecuted = Boolean(response?.ok);
   if (response?.ok) {
+    state.createProductCommands = state.createProductCommands.filter((command) =>
+      command.commandId !== approvedCommands[0].commandId
+    );
     state.productCreationFilled = false;
     state.queuedProductCreation = [];
   }
@@ -1641,6 +1737,16 @@ async function confirmShopeeProductPublish() {
     commands: [approvedCommands[0].commandId],
     result: response
   });
+  appendProductEvent(
+    response?.ok ? "Shopee product submitted" : "Shopee publish failed",
+    response?.ok
+      ? approvedCommands[0].payload?.product?.title || approvedCommands[0].productId
+      : response?.error || response?.evidence?.error || response?.status || "Shopee did not click Save and Publish.",
+    response?.ok ? "success" : "error"
+  );
+  if (response?.ok && options.continueQueue && state.createProductCommands.length > 0) {
+    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true });
+  }
   void refreshSellerTimeline().catch(() => undefined);
 }
 

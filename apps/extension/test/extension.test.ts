@@ -509,6 +509,9 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain('id="liveseller-material-intake"');
     expect(sidePanel).toContain("Drag product images here");
     expect(sidePanel).toContain("Generate product plan");
+    expect(sidePanel).toContain("Activity");
+    expect(sidePanel).toContain('id="product-event-log"');
+    expect(sidePanel).toContain("Approve all and create");
     expect(sidePanel).toContain("More options");
     expect(sidePanel).toContain("Load cached plan");
     expect(sidePanel).toContain("Generated after processing");
@@ -552,6 +555,9 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("createIntakeReviewDraft");
     expect(sidePanelScript).toContain("operator_review_plan_created");
     expect(sidePanelScript).toContain("operator_approval_recorded");
+    expect(sidePanelScript).toContain("appendProductEvent");
+    expect(sidePanelScript).toContain("Approve all complete");
+    expect(sidePanelScript).toContain("Shopee form filled");
     expect(sidePanelScript).toContain("requestPlanChanges");
     expect(sidePanelScript).toContain("Request changes");
     expect(sidePanelScript).toContain("liveseller_record_product_review_decision");

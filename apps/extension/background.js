@@ -115,6 +115,40 @@ function fillShopeeCreateProductForm(command, options = {}) {
     return undefined;
   }
 
+  function visible(element) {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  }
+
+  function findSectionByText(labels) {
+    const normalized = labels.map((label) => String(label).toLowerCase());
+    return Array.from(document.querySelectorAll("section, div, label")).find((element) => {
+      const text = String(element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      return visible(element) && normalized.some((label) => text.includes(label));
+    });
+  }
+
+  function writeNearLabel(labels, value, fieldName, selectors = "input, textarea, [contenteditable='true']") {
+    const section = findSectionByText(labels);
+    const candidates = [
+      ...(section ? Array.from(section.querySelectorAll(selectors)) : []),
+      ...Array.from(document.querySelectorAll(selectors))
+    ].filter((element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable);
+    const target = candidates.find((element) => visible(element) && !element.disabled && element.getAttribute("aria-disabled") !== "true");
+    if (!target) {
+      return undefined;
+    }
+    if (target.isContentEditable) {
+      target.textContent = String(value);
+      target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: String(value) }));
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+    } else {
+      setNativeValue(target, value);
+    }
+    return fieldName;
+  }
+
   function fileFromDataUrl(image, index) {
     const [header, base64] = String(image.uri || "").split(",");
     if (!header?.startsWith("data:") || !base64) {
@@ -165,10 +199,13 @@ function fillShopeeCreateProductForm(command, options = {}) {
       "input[placeholder*='product name' i]",
       "input[placeholder*='Brand Name' i]",
       "input[placeholder*='Product Type' i]"
-    ], product.title),
-    write(["textarea[name='description']", "[name='description']", "textarea[placeholder*='description' i]"], product.description),
-    write(["[name='price']", "input[placeholder*='price' i]"], product.price),
-    write(["[name='stock']", "input[placeholder*='stock' i]"], product.stock),
+    ], product.title) || writeNearLabel(["product name"], product.title, "title", "input"),
+    write(["textarea[name='description']", "[name='description']", "textarea[placeholder*='description' i]"], product.description)
+      || writeNearLabel(["product description", "description"], product.description, "description", "textarea, [contenteditable='true']"),
+    write(["[name='price']", "input[placeholder*='price' i]"], product.price)
+      || writeNearLabel(["price"], product.price, "price", "input"),
+    write(["[name='stock']", "input[placeholder*='stock' i]"], product.stock)
+      || writeNearLabel(["stock"], product.stock, "stock", "input"),
     write(["[name='sku']", "input[placeholder*='sku' i]"], product.sku)
   ].filter(Boolean);
   return {
