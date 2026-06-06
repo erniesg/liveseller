@@ -13,7 +13,7 @@ const translations = {
     aiTitle: "AI listing draft",
     aiHint: "Generated locally as a front-end demo. Seller approval is required.",
     waitingForImages: "Waiting",
-    draftReady: "Draft ready",
+    draftReady: "Completed",
     productName: "Product name",
     category: "Category",
     categoryFashion: "Fashion Accessories",
@@ -27,14 +27,18 @@ const translations = {
     approveUpload: "Approve",
     rejectDraft: "Reject",
     statusIdle: "Add product images to begin.",
-    statusDraftReady: "AI prepared a listing draft. Please review before approving.",
+    statusDraftReady: "AI completed the listing draft. Review the fields, then approve.",
     statusApproved: "Approved. Demo upload is queued, but no Shopee backend call is made.",
     statusRejected: "Rejected. The draft will not be uploaded.",
     removeImage: "Remove image",
-    suggestedName: "AI suggested product from images",
+    listingCompleteness: "Listing draft completed",
+    summaryDetails: "Product name, category, price, and stock are filled.",
+    summaryDescription: "Description is generated from the uploaded image.",
+    summaryReview: "Seller can edit any field before approval.",
+    suggestedName: "{name}",
     suggestedPrice: "SGD 19.90",
     suggestedDescription:
-      "AI detected the uploaded product images and prepared a seller-editable draft. Confirm product details, price, stock, and category before approving upload."
+      "Product draft for {name}. AI prepared a seller-editable listing from the uploaded image, including product name, category, suggested price, stock, and a concise product description. Please confirm photo accuracy, variants, price, and stock before approving upload."
   },
   "zh-hant": {
     headerTitle: "上架助手",
@@ -50,7 +54,7 @@ const translations = {
     aiTitle: "AI 上架草稿",
     aiHint: "此為前端示範產生內容，必須由賣家批准。",
     waitingForImages: "等待中",
-    draftReady: "草稿已就緒",
+    draftReady: "已完成",
     productName: "商品名稱",
     category: "類別",
     categoryFashion: "時尚配件",
@@ -64,14 +68,18 @@ const translations = {
     approveUpload: "批准",
     rejectDraft: "拒絕",
     statusIdle: "加入商品圖片即可開始。",
-    statusDraftReady: "AI 已準備上架草稿，請審核後再批准。",
+    statusDraftReady: "AI 已完成上架草稿，請檢查欄位後再批准。",
     statusApproved: "已批准。示範上架已排入佇列，但不會呼叫 Shopee 後端。",
     statusRejected: "已拒絕。此草稿不會上傳。",
     removeImage: "移除圖片",
-    suggestedName: "AI 從圖片建議的商品",
+    listingCompleteness: "上架草稿已完成",
+    summaryDetails: "商品名稱、類別、價格與庫存已填好。",
+    summaryDescription: "商品描述已根據上傳圖片產生。",
+    summaryReview: "賣家批准前仍可編輯任何欄位。",
+    suggestedName: "{name}",
     suggestedPrice: "SGD 19.90",
     suggestedDescription:
-      "AI 已根據上傳的商品圖片建立可編輯草稿。批准上架前，請確認商品資料、價格、庫存與類別。"
+      "{name} 的商品草稿。AI 已根據上傳圖片建立可編輯上架資料，包含商品名稱、類別、建議價格、庫存與精簡商品描述。批准前請確認圖片、款式、價格與庫存。"
   },
   "zh-hans": {
     headerTitle: "上架助手",
@@ -87,7 +95,7 @@ const translations = {
     aiTitle: "AI 上架草稿",
     aiHint: "此为前端演示生成内容，必须由卖家批准。",
     waitingForImages: "等待中",
-    draftReady: "草稿已就绪",
+    draftReady: "已完成",
     productName: "商品名称",
     category: "类别",
     categoryFashion: "时尚配件",
@@ -101,19 +109,24 @@ const translations = {
     approveUpload: "批准",
     rejectDraft: "拒绝",
     statusIdle: "加入商品图片即可开始。",
-    statusDraftReady: "AI 已准备上架草稿，请审核后再批准。",
+    statusDraftReady: "AI 已完成上架草稿，请检查字段后再批准。",
     statusApproved: "已批准。演示上架已加入队列，但不会调用 Shopee 后端。",
     statusRejected: "已拒绝。此草稿不会上传。",
     removeImage: "移除图片",
-    suggestedName: "AI 从图片建议的商品",
+    listingCompleteness: "上架草稿已完成",
+    summaryDetails: "商品名称、类别、价格与库存已填好。",
+    summaryDescription: "商品描述已根据上传图片生成。",
+    summaryReview: "卖家批准前仍可编辑任何字段。",
+    suggestedName: "{name}",
     suggestedPrice: "SGD 19.90",
     suggestedDescription:
-      "AI 已根据上传的商品图片创建可编辑草稿。批准上架前，请确认商品资料、价格、库存与类别。"
+      "{name} 的商品草稿。AI 已根据上传图片创建可编辑上架资料，包含商品名称、类别、建议价格、库存与精简商品描述。批准前请确认图片、款式、价格与库存。"
   }
 };
 
 let currentLanguage = "en";
 let selectedImages = [];
+let generatedDraftSource = "";
 let statusKey = "statusIdle";
 
 const dropzone = document.getElementById("dropzone");
@@ -130,6 +143,7 @@ const productName = document.getElementById("product-name");
 const price = document.getElementById("price");
 const stock = document.getElementById("stock");
 const description = document.getElementById("description");
+const listingSummary = document.getElementById("listing-summary");
 const languageButtons = document.querySelectorAll("[data-language]");
 
 function translate(key, params = {}) {
@@ -171,23 +185,61 @@ function applyLanguage(language) {
   setStatus(statusKey);
 }
 
+function titleCase(value) {
+  return value
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function inferProductName(fileName) {
+  const cleanName = fileName
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b(img|image|photo|product|shopee|upload)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return cleanName ? titleCase(cleanName) : translate("suggestedName", { name: "Featured Product" });
+}
+
+function buildDraftFromPrimaryImage() {
+  const primaryImage = selectedImages[0];
+  const inferredName = primaryImage ? inferProductName(primaryImage.name) : "Featured Product";
+
+  return {
+    source: primaryImage?.name ?? "",
+    name: translate("suggestedName", { name: inferredName }),
+    price: translate("suggestedPrice"),
+    stock: "20",
+    description: translate("suggestedDescription", { name: inferredName })
+  };
+}
+
 function fillDraft() {
-  if (productName && !productName.value) {
-    productName.value = translate("suggestedName");
+  const draft = buildDraftFromPrimaryImage();
+  const shouldRefreshDraft = generatedDraftSource !== draft.source;
+
+  if (productName && (!productName.value || shouldRefreshDraft)) {
+    productName.value = draft.name;
   }
-  if (price && !price.value) {
-    price.value = translate("suggestedPrice");
+  if (price && (!price.value || shouldRefreshDraft)) {
+    price.value = draft.price;
   }
-  if (stock && !stock.value) {
-    stock.value = "20";
+  if (stock && (!stock.value || shouldRefreshDraft)) {
+    stock.value = draft.stock;
   }
-  if (description && !description.value) {
-    description.value = translate("suggestedDescription");
+  if (description && (!description.value || shouldRefreshDraft)) {
+    description.value = draft.description;
   }
+  generatedDraftSource = draft.source;
 
   setText(aiStatus, "draftReady");
   aiStatus?.classList.remove("tag-warning");
   aiStatus?.classList.add("tag-success");
+  listingSummary?.removeAttribute("hidden");
   stepAi?.classList.add("active");
   approve?.removeAttribute("disabled");
   reject?.removeAttribute("disabled");
@@ -206,10 +258,12 @@ function clearDraft() {
   if (description) {
     description.value = "";
   }
+  generatedDraftSource = "";
 
   setText(aiStatus, "waitingForImages");
   aiStatus?.classList.add("tag-warning");
   aiStatus?.classList.remove("tag-success");
+  listingSummary?.setAttribute("hidden", "true");
   stepAi?.classList.remove("active");
   stepApproval?.classList.remove("active");
   approve?.setAttribute("disabled", "true");

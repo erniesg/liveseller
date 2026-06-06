@@ -433,6 +433,36 @@ textarea:focus {
   font-size: 0.88rem;
 }
 
+.listing-summary {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d9f7be;
+  border-radius: 4px;
+  background: var(--success-soft);
+}
+
+.listing-summary[hidden] {
+  display: none;
+}
+
+.listing-summary h3 {
+  margin: 0;
+  color: #237804;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.listing-summary ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 .action-bar {
   display: grid;
   grid-template-columns: 1fr 1fr;
