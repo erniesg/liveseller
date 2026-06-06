@@ -493,6 +493,29 @@ describe("prep catalog brain", () => {
     expect(result.generatedImagePaths).toHaveLength(1);
     expect(existsSync(result.generatedImagePaths[0]!)).toBe(true);
     expect(readFileSync(result.generatedImagePaths[0]!, "utf8")).toBe("generated png bytes");
+    expect(existsSync(result.timingPath)).toBe(true);
+    expect(result.timings.totalDurationMs).toBeGreaterThanOrEqual(0);
+    expect(result.timings.segments.map((segment) => segment.name)).toEqual(
+      expect.arrayContaining([
+        "prepare_output_dirs",
+        "copy_input_image",
+        "ingest_seller_material",
+        "persist_initial_review_plan",
+        "run_parallel_generation_tasks",
+        "persist_updated_review_plan",
+        `image_edit:${result.updatedReviewPlan.generationTasks.find((task) => task.taskType === "image_edit")!.taskId}`
+      ])
+    );
+    expect(JSON.parse(readFileSync(result.timingPath, "utf8"))).toMatchObject({
+      totalStartedAt: expect.any(String),
+      totalCompletedAt: expect.any(String),
+      segments: expect.arrayContaining([
+        expect.objectContaining({
+          name: "run_parallel_generation_tasks",
+          durationMs: expect.any(Number)
+        })
+      ])
+    });
   });
 
   it("loads env files by walking up from a workspace directory", () => {

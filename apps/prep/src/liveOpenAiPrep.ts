@@ -37,9 +37,25 @@ export type OneImageLivePrepResult = {
   inputFolder: string;
   initialReviewPlanPath: string;
   updatedReviewPlanPath: string;
+  timingPath: string;
   generatedImagePaths: string[];
+  timings: LivePrepTimings;
   initialReviewPlan: ReturnType<typeof ProductReviewPlanSchema.parse>;
   updatedReviewPlan: ReturnType<typeof ProductReviewPlanSchema.parse>;
+};
+
+export type LivePrepTimingSegment = {
+  name: string;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+};
+
+export type LivePrepTimings = {
+  totalStartedAt: string;
+  totalCompletedAt: string;
+  totalDurationMs: number;
+  segments: LivePrepTimingSegment[];
 };
 
 function assertNonSecret(value: string | undefined, name: string): string {
@@ -210,7 +226,42 @@ function parseArg(name: string): string | undefined {
   return index === -1 ? undefined : process.argv[index + 1];
 }
 
+function createTimingRecorder() {
+  const totalStartTime = performance.now();
+  const totalStartedAt = new Date().toISOString();
+  const segments: LivePrepTimingSegment[] = [];
+
+  async function measure<T>(name: string, run: () => Promise<T> | T): Promise<T> {
+    const startTime = performance.now();
+    const startedAt = new Date().toISOString();
+    try {
+      return await run();
+    } finally {
+      const completedAt = new Date().toISOString();
+      segments.push({
+        name,
+        startedAt,
+        completedAt,
+        durationMs: Math.round((performance.now() - startTime) * 1000) / 1000
+      });
+    }
+  }
+
+  function snapshot(): LivePrepTimings {
+    const totalCompletedAt = new Date().toISOString();
+    return {
+      totalStartedAt,
+      totalCompletedAt,
+      totalDurationMs: Math.round((performance.now() - totalStartTime) * 1000) / 1000,
+      segments
+    };
+  }
+
+  return { measure, snapshot };
+}
+
 export async function runOneImageLivePrep(options: OneImageLivePrepOptions): Promise<OneImageLivePrepResult> {
+  const timing = createTimingRecorder();
   const apiKey = assertNonSecret(options.apiKey, "apiKey");
   const sourceImagePath = resolve(options.sourceImagePath);
   if (!existsSync(sourceImagePath)) {
@@ -220,11 +271,13 @@ export async function runOneImageLivePrep(options: OneImageLivePrepOptions): Pro
   const outputDir = resolve(options.outputDir);
   const inputFolder = join(outputDir, "input");
   const generatedFolder = join(outputDir, "generated");
-  mkdirSync(inputFolder, { recursive: true });
-  mkdirSync(generatedFolder, { recursive: true });
+  await timing.measure("prepare_output_dirs", () => {
+    mkdirSync(inputFolder, { recursive: true });
+    mkdirSync(generatedFolder, { recursive: true });
+  });
 
   const inputImagePath = join(inputFolder, basename(sourceImagePath));
-  copyFileSync(sourceImagePath, inputImagePath);
+  await timing.measure("copy_input_image", () => copyFileSync(sourceImagePath, inputImagePath));
 
   const product = oneImageProduct(sourceImagePath, options.products ?? vintageJewelryProducts);
   const session = {
@@ -232,51 +285,67 @@ export async function runOneImageLivePrep(options: OneImageLivePrepOptions): Pro
     sessionId: options.liveSessionSpec?.sessionId ?? "live-one-image-openai-001",
     products: [product]
   };
-  const material = buildSellerMaterialIngestion(inputFolder, {
-    products: [product],
-    liveSessionSpec: session
-  });
+  const material = await timing.measure("ingest_seller_material", () =>
+    buildSellerMaterialIngestion(inputFolder, {
+      products: [product],
+      liveSessionSpec: session
+    })
+  );
   const initialReviewPlan = ProductReviewPlanSchema.parse(material.productReviewPlan);
   const initialReviewPlanPath = join(outputDir, "review-plan.initial.json");
-  writeFileSync(initialReviewPlanPath, JSON.stringify(initialReviewPlan, null, 2));
+  await timing.measure("persist_initial_review_plan", () =>
+    writeFileSync(initialReviewPlanPath, JSON.stringify(initialReviewPlan, null, 2))
+  );
 
   const generatedImagePaths: string[] = [];
   const imagePathByRef = new Map(product.media.images.map((image) => [image.uri, inputImagePath]));
-  const updatedReviewPlan = await runPendingPrepGenerationTasks(
-    initialReviewPlan,
-    async (task) => {
-      if (task.taskType !== "image_edit") {
-        return { outputRefs: task.outputRefs, citations: task.citations };
+  const updatedReviewPlan = await timing.measure(
+    "run_parallel_generation_tasks",
+    () => runPendingPrepGenerationTasks(
+      initialReviewPlan,
+      async (task) => {
+        if (task.taskType !== "image_edit") {
+          return { outputRefs: task.outputRefs, citations: task.citations };
+        }
+
+        return timing.measure(`image_edit:${task.taskId}`, async () => {
+          const imagePath = imagePathByRef.get(task.inputRefs[0] ?? "") ?? inputImagePath;
+          const prompt = material.photoEnhancementPlan.find((plan) => plan.productId === task.productId)?.prompts[0]
+            ?? `Create a Shopee-ready product image variant for ${product.title}. Preserve the exact product and visible condition.`;
+          const imageBytes = await requestImageEdit({
+            apiKey,
+            imagePath,
+            prompt,
+            fetchImpl: options.fetchImpl ?? fetch
+          });
+          const generatedFileName = `${task.taskId.replaceAll(/[^\w.-]+/gu, "-")}.png`;
+          const generatedPath = join(generatedFolder, generatedFileName);
+          writeFileSync(generatedPath, imageBytes);
+          generatedImagePaths.push(generatedPath);
+
+          return {
+            outputRefs: [`generated/${generatedFileName}`],
+            citations: task.citations
+          };
+        });
       }
-
-      const imagePath = imagePathByRef.get(task.inputRefs[0] ?? "") ?? inputImagePath;
-      const prompt = material.photoEnhancementPlan.find((plan) => plan.productId === task.productId)?.prompts[0]
-        ?? `Create a Shopee-ready product image variant for ${product.title}. Preserve the exact product and visible condition.`;
-      const imageBytes = await requestImageEdit({
-        apiKey,
-        imagePath,
-        prompt,
-        fetchImpl: options.fetchImpl ?? fetch
-      });
-      const generatedFileName = `${task.taskId.replaceAll(/[^\w.-]+/gu, "-")}.png`;
-      const generatedPath = join(generatedFolder, generatedFileName);
-      writeFileSync(generatedPath, imageBytes);
-      generatedImagePaths.push(generatedPath);
-
-      return {
-        outputRefs: [`generated/${generatedFileName}`],
-        citations: task.citations
-      };
-    }
+    )
   );
   const updatedReviewPlanPath = join(outputDir, "review-plan.updated.json");
-  writeFileSync(updatedReviewPlanPath, JSON.stringify(updatedReviewPlan, null, 2));
+  await timing.measure("persist_updated_review_plan", () =>
+    writeFileSync(updatedReviewPlanPath, JSON.stringify(updatedReviewPlan, null, 2))
+  );
+  const timings = timing.snapshot();
+  const timingPath = join(outputDir, "timings.json");
+  writeFileSync(timingPath, JSON.stringify(timings, null, 2));
 
   return {
     inputFolder,
     initialReviewPlanPath,
     updatedReviewPlanPath,
+    timingPath,
     generatedImagePaths,
+    timings,
     initialReviewPlan,
     updatedReviewPlan
   };
@@ -301,7 +370,9 @@ async function main(): Promise<void> {
     inputFolder: result.inputFolder,
     initialReviewPlanPath: result.initialReviewPlanPath,
     updatedReviewPlanPath: result.updatedReviewPlanPath,
+    timingPath: result.timingPath,
     generatedImagePaths: result.generatedImagePaths,
+    timings: result.timings,
     taskSummary: result.updatedReviewPlan.generationTasks.map((task) => ({
       taskId: task.taskId,
       taskType: task.taskType,

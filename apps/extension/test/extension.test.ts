@@ -6,6 +6,7 @@ import {
   validAuditEvent,
   validLiveAction,
   validLiveSessionSpec,
+  validProductReviewPlan,
   validShopeeCreateProductCommand
 } from "@liveseller/contracts";
 import {
@@ -13,10 +14,12 @@ import {
   executeShopeeCreateProductCommand
 } from "../src/commandExecutor";
 import {
+  buildProductReviewDecision,
   extractViewerMessage,
   handleReceiveNormalUserMessage,
   installReceiveNormalUserMessageHook,
   renderCodexOperatorEvents,
+  renderProductReviewPlan,
   renderSellerUiPolicy,
   toViewerChatEvent
 } from "../src/contentScript";
@@ -258,6 +261,50 @@ describe("Shopee extension command safety", () => {
     expect(operator?.textContent).toContain("liveseller_record_seller_review_response");
     expect(operator?.textContent).not.toMatch(/OPENAI|sk-/i);
     expect(document.querySelectorAll("[data-liveseller-codex-event]")).toHaveLength(3);
+  });
+
+  it("renders generated prep outputs and validated approval decisions", () => {
+    document.body.innerHTML = '<section id="plan"></section>';
+    const productId = validProductReviewPlan.items[0]!.productId;
+    const taskId = validProductReviewPlan.generationTasks.find((task) =>
+      task.productId === productId && task.taskType === "image_edit"
+    )!.taskId;
+    const plan = {
+      ...validProductReviewPlan,
+      generationTasks: validProductReviewPlan.generationTasks.map((task) =>
+        task.taskId === taskId
+          ? {
+              ...task,
+              status: "completed" as const,
+              outputRefs: ["generated/clean-background.png"],
+              completedAt: "2026-06-06T02:20:00.000Z"
+            }
+          : task
+      )
+    };
+
+    renderProductReviewPlan(document.getElementById("plan")!, plan, {
+      artifactBaseUri: "file:///tmp/liveseller-run",
+      decidedAt: "2026-06-06T02:30:00.000Z"
+    });
+
+    const generatedImage = document.querySelector("[data-liveseller-generated-ref='generated/clean-background.png']");
+    expect(generatedImage?.getAttribute("src")).toBe("file:///tmp/liveseller-run/generated/clean-background.png");
+    expect(document.querySelector("[data-liveseller-image-prompts]")?.textContent).toContain("Create a square");
+
+    const approve = document.querySelector("[data-liveseller-action-id^='approve-']");
+    const decision = JSON.parse(approve?.getAttribute("data-liveseller-product-decision") ?? "{}");
+    expect(decision).toMatchObject({
+      productId,
+      status: "approved",
+      decidedBy: "seller",
+      decidedAt: "2026-06-06T02:30:00.000Z"
+    });
+    expect(buildProductReviewDecision(validProductReviewPlan, productId, "reject", "2026-06-06T02:31:00.000Z"))
+      .toMatchObject({
+        productId,
+        status: "rejected"
+      });
   });
 
   it("keeps OpenAI keys out of extension manifest", () => {

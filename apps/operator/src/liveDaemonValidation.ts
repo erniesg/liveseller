@@ -11,6 +11,8 @@ const timeoutMs = Number(process.env.LIVESELLER_LIVE_DAEMON_TIMEOUT_MS ?? 180_00
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const traceDir = join(repoRoot, ".liveseller");
 const tracePath = join(traceDir, "live-daemon-validation.jsonl");
+const runStartedAt = new Date().toISOString();
+const runStartTime = performance.now();
 
 mkdirSync(traceDir, { recursive: true });
 writeFileSync(tracePath, "");
@@ -21,6 +23,24 @@ function trace(event: Record<string, unknown>): void {
     timestamp: new Date().toISOString(),
     ...event
   }) + "\n");
+}
+
+async function timed<T>(name: string, run: () => Promise<T> | T): Promise<T> {
+  const startedAt = new Date().toISOString();
+  const startTime = performance.now();
+  trace({ type: "timing_segment_started", name, startedAt });
+  try {
+    return await run();
+  } finally {
+    const completedAt = new Date().toISOString();
+    trace({
+      type: "timing_segment_completed",
+      name,
+      startedAt,
+      completedAt,
+      durationMs: Math.round((performance.now() - startTime) * 1000) / 1000
+    });
+  }
 }
 
 function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
@@ -65,14 +85,17 @@ function buildSingleProductDropFolder(): string {
 }
 
 const singleProduct = vintageJewelryProducts[0]!;
-const prep = buildSellerMaterialIngestion(buildSingleProductDropFolder(), {
-  products: [singleProduct],
-  liveSessionSpec: {
-    ...vintageJewelryLiveSessionSpec,
-    sessionId: "live-daemon-single-product-001",
-    products: [singleProduct]
-  }
-});
+const dropFolder = await timed("prepare_single_product_drop_folder", () => buildSingleProductDropFolder());
+const prep = await timed("ingest_seller_material", () =>
+  buildSellerMaterialIngestion(dropFolder, {
+    products: [singleProduct],
+    liveSessionSpec: {
+      ...vintageJewelryLiveSessionSpec,
+      sessionId: "live-daemon-single-product-001",
+      products: [singleProduct]
+    }
+  })
+);
 const item = requireFirst(prep.productReviewPlan.items[0], "product review item");
 const round = requireFirst(item.reviewRounds[0], "seller review round");
 const product = item.product;
@@ -114,18 +137,30 @@ transport.child.stderr.on("data", (chunk) => {
 });
 
 try {
-  const result = await withTimeout(
-    runCodexAppServerReviewSession(
-      {
-        cwd: repoRoot,
-        reviewPlan: prep.productReviewPlan,
-        sellerText,
-        onTrace: (event) => trace({ type: "jsonrpc", ...event })
-      },
-      transport
-    ),
-    "Codex app-server live validation"
+  const result = await timed(
+    "codex_app_server_review_session",
+    () => withTimeout(
+      runCodexAppServerReviewSession(
+        {
+          cwd: repoRoot,
+          reviewPlan: prep.productReviewPlan,
+          sellerText,
+          onTrace: (event) => trace({ type: "jsonrpc", ...event })
+        },
+        transport
+      ),
+      "Codex app-server live validation"
+    )
   );
+  const totalCompletedAt = new Date().toISOString();
+  const totalDurationMs = Math.round((performance.now() - runStartTime) * 1000) / 1000;
+
+  trace({
+    type: "timing_total",
+    startedAt: runStartedAt,
+    completedAt: totalCompletedAt,
+    durationMs: totalDurationMs
+  });
 
   const toolNames = result.operatorEvents.flatMap((event) =>
     event.type === "tool_call_received" && event.tool ? [event.tool] : []
@@ -161,6 +196,11 @@ try {
     updatedTitle: updatedItem.product.title,
     imagePromptCount: updatedItem.photoEnhancementPlan.prompts.length,
     createProductCommandCount: result.createProductCommands.length,
+    timings: {
+      startedAt: runStartedAt,
+      completedAt: totalCompletedAt,
+      durationMs: totalDurationMs
+    },
     operatorEvents: result.operatorEvents
   }, null, 2));
   trace({

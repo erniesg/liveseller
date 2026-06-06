@@ -1,10 +1,14 @@
 import {
   type AuditEvent,
   type LiveAction,
+  type ProductReviewDecision,
+  type ProductReviewPlan,
   type RuntimeEvent,
   type ToolResult,
   AuditEventSchema,
   LiveActionSchema,
+  ProductReviewDecisionSchema,
+  ProductReviewPlanSchema,
   ToolResultSchema
 } from "@liveseller/contracts";
 import { RUNTIME_ORIGIN } from "./background";
@@ -91,6 +95,13 @@ export type CodexOperatorEventPayload = {
     tool?: string;
     callId?: string;
   }>;
+};
+
+export type ProductReviewAction = "approve" | "reject";
+
+export type RenderProductReviewPlanOptions = {
+  artifactBaseUri?: string;
+  decidedAt?: string;
 };
 
 export type HandledReceiveNormalUserMessage = {
@@ -361,6 +372,119 @@ export function renderSellerUiPolicy(target: Element, policy: SellerUiPolicyPayl
       const photo = doc.createElement("p");
       photo.textContent = `${photoPlan.model}: ${photoPlan.promptCount} prompts from ${photoPlan.sourceImageCount} source images`;
       article.append(photo);
+    }
+
+    section.append(article);
+  }
+
+  target.replaceChildren(section);
+}
+
+function joinUri(baseUri: string | undefined, ref: string): string {
+  if (!baseUri || /^(?:https?:|file:|data:|\/)/u.test(ref)) {
+    return ref;
+  }
+  return `${baseUri.replace(/\/$/u, "")}/${ref.replace(/^\//u, "")}`;
+}
+
+export function buildProductReviewDecision(
+  plan: ProductReviewPlan,
+  productId: string,
+  action: ProductReviewAction,
+  decidedAt = new Date().toISOString()
+): ProductReviewDecision {
+  const parsedPlan = ProductReviewPlanSchema.parse(plan);
+  const item = parsedPlan.items.find((candidate) => candidate.productId === productId);
+  if (!item) {
+    throw new Error(`Cannot build seller decision for unknown product: ${productId}`);
+  }
+
+  return ProductReviewDecisionSchema.parse({
+    decisionId: `decision-${productId}-${action}-${Date.parse(decidedAt)}`,
+    productId,
+    status: action === "approve" ? "approved" : "rejected",
+    decidedBy: "seller",
+    decidedAt,
+    reason: action === "approve"
+      ? "Seller approved the reviewed product plan and generated assets."
+      : "Seller rejected the reviewed product plan.",
+    citations: item.product.evidence
+  });
+}
+
+export function renderProductReviewPlan(
+  target: Element,
+  plan: ProductReviewPlan,
+  options: RenderProductReviewPlanOptions = {}
+): void {
+  const parsedPlan = ProductReviewPlanSchema.parse(plan);
+  const doc = target.ownerDocument;
+  const section = doc.createElement("section");
+  section.setAttribute("data-liveseller-product-review-plan", parsedPlan.reviewPlanId);
+
+  const heading = doc.createElement("h2");
+  heading.textContent = "Product review plan";
+  section.append(heading);
+
+  const status = doc.createElement("p");
+  status.setAttribute("data-liveseller-review-status", parsedPlan.status);
+  status.textContent = `${parsedPlan.status} - ${parsedPlan.items.length} products`;
+  section.append(status);
+
+  for (const item of parsedPlan.items) {
+    const article = doc.createElement("article");
+    article.setAttribute("data-liveseller-product-id", item.productId);
+
+    const title = doc.createElement("h3");
+    title.textContent = item.product.title;
+    article.append(title);
+
+    const facts = doc.createElement("p");
+    facts.textContent = `${item.product.sku} - ${item.product.currency} ${item.product.price.toFixed(2)} - ${item.product.stock} stock`;
+    article.append(facts);
+
+    const prompts = doc.createElement("ul");
+    prompts.setAttribute("data-liveseller-image-prompts", item.productId);
+    for (const prompt of item.photoEnhancementPlan.prompts) {
+      const promptItem = doc.createElement("li");
+      promptItem.textContent = prompt;
+      prompts.append(promptItem);
+    }
+    article.append(prompts);
+
+    const generatedTasks = parsedPlan.generationTasks.filter((task) =>
+      task.productId === item.productId &&
+      task.taskType === "image_edit" &&
+      task.status === "completed"
+    );
+    if (generatedTasks.length > 0) {
+      const generated = doc.createElement("div");
+      generated.setAttribute("data-liveseller-generated-assets", item.productId);
+      for (const task of generatedTasks) {
+        for (const outputRef of task.outputRefs) {
+          const image = doc.createElement("img");
+          image.src = joinUri(options.artifactBaseUri, outputRef);
+          image.alt = `${item.product.title} generated option`;
+          image.setAttribute("data-liveseller-generated-ref", outputRef);
+          generated.append(image);
+        }
+      }
+      article.append(generated);
+    }
+
+    for (const action of ["approve", "reject"] as const) {
+      const decision = buildProductReviewDecision(
+        parsedPlan,
+        item.productId,
+        action,
+        options.decidedAt
+      );
+      const button = doc.createElement("button");
+      button.type = "button";
+      button.setAttribute("data-liveseller-action-id", `${action}-${item.productId}`);
+      button.setAttribute("data-liveseller-product-decision", JSON.stringify(decision));
+      button.textContent = action === "approve" ? "Approve" : "Reject";
+      article.append(button);
     }
 
     section.append(article);
