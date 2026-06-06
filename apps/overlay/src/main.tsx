@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RuntimeOverlay } from "./App";
+import { SellerConsole } from "./SellerConsole";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -20,9 +21,14 @@ const runtimeOrigin =
   viteEnv.env?.VITE_RUNTIME_ORIGIN ??
   "http://127.0.0.1:8787";
 const sessionId = params.get("sessionId") ?? undefined;
+const mode = params.get("mode");
 
 createRoot(root).render(
   <StrictMode>
-    <RuntimeOverlay runtimeOrigin={runtimeOrigin} sessionId={sessionId} />
+    {mode === "seller" ? (
+      <SellerConsole runtimeOrigin={runtimeOrigin} sessionId={sessionId} />
+    ) : (
+      <RuntimeOverlay runtimeOrigin={runtimeOrigin} sessionId={sessionId} />
+    )}
   </StrictMode>
 );

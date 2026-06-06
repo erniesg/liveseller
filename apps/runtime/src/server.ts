@@ -3,7 +3,8 @@ import {
   ProductReviewDecisionSchema,
   ProductReviewPlanSchema,
   RuntimeEventSchema,
-  validLiveSessionSpec
+  validLiveSessionSpec,
+  vintageJewelryLiveSessionSpec
 } from "@liveseller/contracts";
 import {
   buildShopeeCreateProductCommands,
@@ -11,11 +12,25 @@ import {
 } from "./approvals";
 import { createRuntimeSessionStore } from "./sessionStore";
 
-const sessionStore = createRuntimeSessionStore(validLiveSessionSpec);
+const sessionStores = new Map(
+  [validLiveSessionSpec, vintageJewelryLiveSessionSpec].map((session) => [
+    session.sessionId,
+    createRuntimeSessionStore(session)
+  ])
+);
 
 function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, { "content-type": "application/json" });
+  res.writeHead(status, {
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-origin": "*",
+    "content-type": "application/json"
+  });
   res.end(JSON.stringify(body));
+}
+
+function sessionIdFromUrl(url: string | undefined, pattern: RegExp): string | undefined {
+  return pattern.exec(url ?? "")?.[1];
 }
 
 async function readJson(req: import("node:http").IncomingMessage) {
@@ -29,19 +44,35 @@ async function readJson(req: import("node:http").IncomingMessage) {
 export function createRuntimeServer() {
   return createServer(async (req, res) => {
     try {
+      if (req.method === "OPTIONS") {
+        sendJson(res, 204, {});
+        return;
+      }
+
       if (req.method === "GET" && req.url === "/health") {
         sendJson(res, 200, { ok: true, service: "@liveseller/runtime" });
         return;
       }
 
-      if (req.method === "GET" && req.url === `/api/live-sessions/${validLiveSessionSpec.sessionId}/spec`) {
-        sendJson(res, 200, validLiveSessionSpec);
+      const specSessionId = sessionIdFromUrl(req.url, /^\/api\/live-sessions\/([^/]+)\/spec$/u);
+      if (req.method === "GET" && specSessionId) {
+        const store = sessionStores.get(specSessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        sendJson(res, 200, store.snapshot().session);
         return;
       }
 
       if (req.method === "POST" && req.url === "/api/runtime/events") {
         const event = RuntimeEventSchema.parse(await readJson(req));
-        const routed = sessionStore.route(event);
+        const store = sessionStores.get(event.sessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        const routed = store.route(event);
         sendJson(res, 200, routed);
         return;
       }
@@ -59,23 +90,47 @@ export function createRuntimeServer() {
         return;
       }
 
-      if (req.method === "GET" && req.url === `/api/audit/${validLiveSessionSpec.sessionId}`) {
-        sendJson(res, 200, sessionStore.snapshot().auditEvents);
+      const auditSessionId = sessionIdFromUrl(req.url, /^\/api\/audit\/([^/]+)$/u);
+      if (req.method === "GET" && auditSessionId) {
+        const store = sessionStores.get(auditSessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        sendJson(res, 200, store.snapshot().auditEvents);
         return;
       }
 
-      if (req.method === "GET" && req.url === `/api/live-sessions/${validLiveSessionSpec.sessionId}/memory`) {
-        sendJson(res, 200, sessionStore.snapshot());
+      const memorySessionId = sessionIdFromUrl(req.url, /^\/api\/live-sessions\/([^/]+)\/memory$/u);
+      if (req.method === "GET" && memorySessionId) {
+        const store = sessionStores.get(memorySessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        sendJson(res, 200, store.snapshot());
         return;
       }
 
-      if (req.method === "GET" && req.url === `/api/live-sessions/${validLiveSessionSpec.sessionId}/summary`) {
-        sendJson(res, 200, sessionStore.summary());
+      const summarySessionId = sessionIdFromUrl(req.url, /^\/api\/live-sessions\/([^/]+)\/summary$/u);
+      if (req.method === "GET" && summarySessionId) {
+        const store = sessionStores.get(summarySessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        sendJson(res, 200, store.summary());
         return;
       }
 
-      if (req.method === "GET" && req.url === `/api/overlay/${validLiveSessionSpec.sessionId}`) {
-        sendJson(res, 200, sessionStore.overlay());
+      const overlaySessionId = sessionIdFromUrl(req.url, /^\/api\/overlay\/([^/]+)$/u);
+      if (req.method === "GET" && overlaySessionId) {
+        const store = sessionStores.get(overlaySessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        sendJson(res, 200, store.overlay());
         return;
       }
 

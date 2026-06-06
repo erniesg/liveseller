@@ -19,6 +19,7 @@ type RuntimeRouteResult = ReturnType<typeof routeRuntimeEvent>;
 
 export type RuntimeSessionStoreSnapshot = {
   sessionId: string;
+  session: LiveSessionSpec;
   products: ProductRecord[];
   currentProductId?: string;
   currentPromoId?: string;
@@ -185,6 +186,7 @@ export function createRuntimeSessionStore(session: LiveSessionSpec): RuntimeSess
     snapshot() {
       return {
         sessionId: session.sessionId,
+        session,
         products: [...productDb.values()],
         currentProductId,
         currentPromoId,

@@ -5,7 +5,8 @@ import {
   ShopeeCreateProductCommandSchema,
   validSellerFreeFormReviewResponse,
   validProductReviewPlan,
-  validLiveSessionSpec
+  validLiveSessionSpec,
+  vintageJewelryLiveSessionSpec
 } from "@liveseller/contracts";
 import {
   buildShopeeCreateProductCommands,
@@ -286,6 +287,73 @@ describe("live brain policy runtime", () => {
       expect(response.status).toBe(200);
       expect(body.sessionId).toBe(validLiveSessionSpec.sessionId);
       expect(body.productCard.productId).toBe(validLiveSessionSpec.products[0]!.id);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
+  it("serves the vintage jewelry session for seller UI and overlay testing", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const origin = `http://127.0.0.1:${address.port}`;
+      const specResponse = await fetch(`${origin}/api/live-sessions/${vintageJewelryLiveSessionSpec.sessionId}/spec`);
+      const spec = await specResponse.json();
+      expect(specResponse.status).toBe(200);
+      expect(spec.sessionId).toBe(vintageJewelryLiveSessionSpec.sessionId);
+
+      const productId = vintageJewelryLiveSessionSpec.products[0]!.id;
+      const eventResponse = await fetch(`${origin}/api/runtime/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          eventId: "event-vintage-console-product",
+          sessionId: vintageJewelryLiveSessionSpec.sessionId,
+          timestamp: "2026-06-06T02:40:00.000Z",
+          source: "seller",
+          type: "product_switch",
+          payload: { productId }
+        })
+      });
+      const eventBody = await eventResponse.json();
+      expect(eventResponse.status).toBe(200);
+      expect(eventBody.overlayState.currentProductId).toBe(productId);
+
+      const overlayResponse = await fetch(`${origin}/api/overlay/${vintageJewelryLiveSessionSpec.sessionId}`);
+      const overlay = await overlayResponse.json();
+      expect(overlay.productCard.productId).toBe(productId);
+      expect(overlay.productCard.imageUri).toContain("vintage-jewelry");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
+  it("sets CORS headers for local seller UI and overlay clients", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/overlay/${validLiveSessionSpec.sessionId}`);
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+
+      const options = await fetch(`http://127.0.0.1:${address.port}/api/runtime/events`, {
+        method: "OPTIONS"
+      });
+      expect(options.status).toBe(204);
+      expect(options.headers.get("access-control-allow-methods")).toContain("POST");
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());

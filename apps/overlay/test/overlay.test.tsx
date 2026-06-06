@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import { validLiveSessionSpec, validOverlayState } from "@liveseller/contracts";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { validLiveSessionSpec, validOverlayState, vintageJewelryLiveSessionSpec } from "@liveseller/contracts";
 import { App, RuntimeOverlay, fetchOverlayState, formatCountdown } from "../src/App";
+import { SellerConsole } from "../src/SellerConsole";
 
 describe("public overlay", () => {
   it("renders product, promo, quantity, countdown, and multilingual captions", () => {
@@ -109,5 +110,102 @@ describe("public overlay", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Overlay runtime status")).toHaveTextContent("Runtime offline"));
     expect(screen.getByText("Bamboo Cooling Tee")).toBeInTheDocument();
+  });
+
+  it("renders a seller console that switches product context and sends video captions to runtime", async () => {
+    const currentProduct = vintageJewelryLiveSessionSpec.products[0]!;
+    const switchedProduct = vintageJewelryLiveSessionSpec.products[1]!;
+    const overlayState = {
+      ...validOverlayState,
+      sessionId: vintageJewelryLiveSessionSpec.sessionId,
+      currentProductId: currentProduct.id,
+      productCard: {
+        productId: currentProduct.id,
+        title: currentProduct.title,
+        price: currentProduct.price,
+        currency: currentProduct.currency,
+        stock: currentProduct.stock,
+        imageUri: currentProduct.media.images[0]!.uri
+      }
+    };
+    const switchedOverlayState = {
+      ...overlayState,
+      currentProductId: switchedProduct.id,
+      productCard: {
+        productId: switchedProduct.id,
+        title: switchedProduct.title,
+        price: switchedProduct.price,
+        currency: switchedProduct.currency,
+        stock: switchedProduct.stock,
+        imageUri: switchedProduct.media.images[0]!.uri
+      }
+    };
+    const requests: unknown[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith(`/api/live-sessions/${vintageJewelryLiveSessionSpec.sessionId}/spec`)) {
+        return new Response(JSON.stringify(vintageJewelryLiveSessionSpec), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.endsWith(`/api/overlay/${vintageJewelryLiveSessionSpec.sessionId}`)) {
+        return new Response(JSON.stringify(overlayState), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.endsWith("/api/runtime/events")) {
+        const event = JSON.parse(String(init?.body));
+        requests.push(event);
+        return new Response(
+          JSON.stringify({
+            overlayState: event.type === "product_switch" ? switchedOverlayState : {
+              ...switchedOverlayState,
+              caption: {
+                text: event.payload.text,
+                language: event.payload.language,
+                visible: true
+              }
+            },
+            actions: []
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+      return new Response(JSON.stringify({ error: "not_found" }), { status: 404 });
+    });
+
+    render(
+      <SellerConsole
+        runtimeOrigin="http://runtime.test"
+        sessionId={vintageJewelryLiveSessionSpec.sessionId}
+        fetchImpl={fetchImpl as typeof fetch}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText(vintageJewelryLiveSessionSpec.title)).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("Show")[1]!);
+    await waitFor(() => expect(requests).toEqual([
+      expect.objectContaining({
+        sessionId: vintageJewelryLiveSessionSpec.sessionId,
+        type: "product_switch",
+        payload: { productId: switchedProduct.id }
+      })
+    ]));
+    expect(within(screen.getByLabelText("Current overlay state")).getByText(switchedProduct.title)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Send caption"));
+    await waitFor(() => expect(requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: vintageJewelryLiveSessionSpec.sessionId,
+          type: "host_transcript"
+        })
+      ])
+    ));
   });
 });
