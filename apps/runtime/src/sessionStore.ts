@@ -2,6 +2,7 @@ import {
   type AuditEvent,
   type LiveAction,
   type LiveSessionSpec,
+  type OverlayState,
   type ProductRecord,
   type RuntimeEvent,
   type SessionMemory,
@@ -12,6 +13,7 @@ import {
 } from "@liveseller/contracts";
 import { routeRuntimeEvent } from "./runtime";
 import { createStreamAccumulator } from "./streamWatcher";
+import { createInitialOverlayState } from "./overlay";
 
 type RuntimeRouteResult = ReturnType<typeof routeRuntimeEvent>;
 
@@ -23,6 +25,7 @@ export type RuntimeSessionStoreSnapshot = {
   sessionMemory: SessionMemory;
   viewerMemory: ViewerMemory[];
   auditEvents: AuditEvent[];
+  overlayState: OverlayState;
 };
 
 export type RuntimeSessionStore = {
@@ -32,6 +35,7 @@ export type RuntimeSessionStore = {
   getProduct(productId: string): ProductRecord | undefined;
   snapshot(): RuntimeSessionStoreSnapshot;
   summary(): ReturnType<ReturnType<typeof createStreamAccumulator>["snapshot"]>;
+  overlay(): OverlayState;
 };
 
 function now(): string {
@@ -66,6 +70,7 @@ export function createRuntimeSessionStore(session: LiveSessionSpec): RuntimeSess
   const viewerMemory = new Map<string, ViewerMemory>();
   const auditEvents: AuditEvent[] = [];
   const accumulator = createStreamAccumulator(session);
+  let overlayState = createInitialOverlayState(session);
   let sessionMemory = buildInitialSessionMemory(session);
   let currentProductId = session.products[0]?.id;
   let currentPromoId = session.promos[0]?.id;
@@ -134,10 +139,12 @@ export function createRuntimeSessionStore(session: LiveSessionSpec): RuntimeSess
         viewerMemory: event.type === "viewer_chat" ? viewerMemory.get(event.payload.viewerId) : undefined,
         sessionMemory,
         currentProductId,
-        currentPromoId
+        currentPromoId,
+        overlayState
       });
 
       auditEvents.push(...result.auditEvents);
+      overlayState = result.overlayState;
       upsertViewerMemory(event, result.actions);
       updateSessionMemory(event, result.actions);
 
@@ -170,12 +177,17 @@ export function createRuntimeSessionStore(session: LiveSessionSpec): RuntimeSess
         currentPromoId,
         sessionMemory,
         viewerMemory: [...viewerMemory.values()],
-        auditEvents
+        auditEvents,
+        overlayState
       };
     },
 
     summary() {
       return accumulator.snapshot();
+    },
+
+    overlay() {
+      return overlayState;
     }
   };
 }

@@ -233,6 +233,66 @@ describe("live brain policy runtime", () => {
     expect(store.summary().status).toBe("closed");
   });
 
+  it("keeps a stateful overlay snapshot across realtime session events", () => {
+    const store = createRuntimeSessionStore(validLiveSessionSpec);
+    const secondProductId = validLiveSessionSpec.products[1]!.id;
+
+    store.route({
+      eventId: "event-product-switch",
+      sessionId: validLiveSessionSpec.sessionId,
+      timestamp: "2026-06-06T02:01:00.000Z",
+      source: "seller",
+      type: "product_switch",
+      payload: {
+        productId: secondProductId
+      }
+    });
+    store.route({
+      eventId: "event-host-caption-stateful",
+      sessionId: validLiveSessionSpec.sessionId,
+      timestamp: "2026-06-06T02:02:00.000Z",
+      source: "host",
+      type: "host_transcript",
+      payload: {
+        text: "这款收纳包适合旅行用",
+        language: "zh",
+        confidence: 0.95
+      }
+    });
+
+    const overlay = store.overlay();
+    expect(overlay.currentProductId).toBe(secondProductId);
+    expect(overlay.productCard?.title).toBe(validLiveSessionSpec.products[1]!.title);
+    expect(overlay.caption).toMatchObject({
+      text: "这款收纳包适合旅行用",
+      language: "zh",
+      visible: true
+    });
+    expect(overlay.translatedCaptions.some((caption) => caption.language === "en")).toBe(true);
+  });
+
+  it("serves the current overlay snapshot over HTTP", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/overlay/${validLiveSessionSpec.sessionId}`);
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.sessionId).toBe(validLiveSessionSpec.sessionId);
+      expect(body.productCard.productId).toBe(validLiveSessionSpec.products[0]!.id);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
   it("finalizes prep review decisions over HTTP and returns create-product commands", async () => {
     const server = createRuntimeServer();
     await new Promise<void>((resolve) => server.listen(0, resolve));

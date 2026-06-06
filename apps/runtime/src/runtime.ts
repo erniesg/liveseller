@@ -3,6 +3,7 @@ import {
   type ContextEnvelope,
   type LiveAction,
   type LiveSessionSpec,
+  type OverlayState,
   type ProductRecord,
   type RuntimeEvent,
   type SessionMemory,
@@ -394,6 +395,7 @@ export function routeRuntimeEvent(
     sessionMemory?: SessionMemory;
     currentProductId?: string;
     currentPromoId?: string;
+    overlayState?: OverlayState;
   } = {}
 ) {
   const context = buildContextEnvelope(event, session, memory);
@@ -413,7 +415,7 @@ export function routeRuntimeEvent(
       })
     )
   ];
-  const overlayState = applyOverlayActions(session, actions, createInitialOverlayState(session));
+  const overlayState = applyOverlayActions(session, actions, memory.overlayState ?? createInitialOverlayState(session));
 
   return {
     context,

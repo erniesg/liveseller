@@ -74,6 +74,11 @@ export function createRuntimeServer() {
         return;
       }
 
+      if (req.method === "GET" && req.url === `/api/overlay/${validLiveSessionSpec.sessionId}`) {
+        sendJson(res, 200, sessionStore.overlay());
+        return;
+      }
+
       sendJson(res, 404, { error: "not_found" });
     } catch (error) {
       sendJson(res, 400, {
