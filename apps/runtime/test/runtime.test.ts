@@ -2,6 +2,7 @@ import {
   type LanguageCode,
   type RuntimeEvent,
   LiveActionSchema,
+  SessionMemorySchema,
   validLiveSessionSpec
 } from "@liveseller/contracts";
 import {
@@ -9,6 +10,8 @@ import {
   decideActions,
   routeRuntimeEvent
 } from "../src/runtime";
+import { buildSessionMemoryFromAudit } from "../src/memory";
+import { summarizeStream } from "../src/postStream";
 
 function viewerEvent(text: string, language?: LanguageCode): RuntimeEvent {
   return {
@@ -58,10 +61,41 @@ describe("live brain policy runtime", () => {
       const actions = decideActions(buildContextEnvelope(viewerEvent(text, "en"), validLiveSessionSpec));
       expect(actions.some((action) => action.type === "send_reply")).toBe(false);
       expect(actions.every((action) => action.requiresApproval)).toBe(true);
+      expect(actions.every((action) => action.approvalId)).toBe(true);
+      expect(actions.every((action) => action.reason.length > 0)).toBe(true);
+      expect(actions.every((action) => action.citations.length > 0)).toBe(true);
       expect(actions.map((action) => action.type)).toEqual(
         expect.arrayContaining([expect.stringMatching(/draft_reply|escalate|request_approval/)])
       );
     }
+  });
+
+  it("records policy and approval audit proof for seller-controlled risky actions", () => {
+    const result = routeRuntimeEvent(
+      viewerEvent("Give me extra discount cheaper best price", "en"),
+      validLiveSessionSpec
+    );
+
+    const policyAudit = result.auditEvents.find((event) => event.kind === "policy");
+    const approvalAudit = result.auditEvents.find((event) => event.kind === "approval");
+    const action = result.actions.find((candidate) => candidate.requiresApproval);
+
+    expect(result.actions.some((candidate) => candidate.type === "send_reply")).toBe(false);
+    expect(policyAudit?.context?.policyFlags[0]).toMatchObject({
+      rule: "discount_negotiation",
+      risk: "medium"
+    });
+    expect(action?.approvalId).toBeDefined();
+    expect(approvalAudit?.approval).toMatchObject({
+      approvalId: action?.approvalId,
+      actionId: action?.actionId,
+      status: "pending",
+      reason: action?.reason
+    });
+    expect(approvalAudit?.approval?.originalAction).toMatchObject({
+      actionId: action?.actionId,
+      requiresApproval: true
+    });
   });
 
   it("emits source and translated captions for Chinese host speech", () => {
@@ -140,5 +174,56 @@ describe("live brain policy runtime", () => {
     expect(result.auditEvents.map((event) => event.kind)).toEqual(
       expect.arrayContaining(["input", "context", "model_action", "tool_result"])
     );
+  });
+
+  it("derives contract-valid session memory from safe viewer questions and record-memory actions", () => {
+    const events = [
+      viewerEvent("How much is the Bamboo Cooling Tee?", "en"),
+      viewerEvent("berapa harga cable organizer?", "ms")
+    ];
+    const auditEvents = events.flatMap((event) =>
+      routeRuntimeEvent(event, validLiveSessionSpec).auditEvents
+    );
+
+    const memory = buildSessionMemoryFromAudit(validLiveSessionSpec, auditEvents);
+
+    expect(() => SessionMemorySchema.parse(memory)).not.toThrow();
+    expect(memory.languageCounts.en).toBeGreaterThan(0);
+    expect(memory.languageCounts.ms).toBeGreaterThan(0);
+    expect(memory.productInterest["prod-cooling-tee"]).toBeGreaterThan(0);
+    expect(memory.productInterest["prod-cable-pouch"]).toBeGreaterThan(0);
+    expect(memory.topQuestions).toEqual(
+      expect.arrayContaining([
+        "How much is the Bamboo Cooling Tee?",
+        "Asked about Bamboo Cooling Tee"
+      ])
+    );
+  });
+
+  it("turns risky cases into post-stream approval recommendations", () => {
+    const auditEvents = [
+      routeRuntimeEvent(viewerEvent("This looks fake and counterfeit", "en"), validLiveSessionSpec),
+      routeRuntimeEvent(viewerEvent("Give me extra discount cheaper best price", "en"), validLiveSessionSpec)
+    ].flatMap((result) => result.auditEvents);
+
+    const summary = summarizeStream(validLiveSessionSpec, auditEvents);
+
+    expect(summary.escalations).toBeGreaterThan(0);
+    expect(summary.approvalsRequested).toBeGreaterThan(0);
+    expect(summary.sessionMemory.escalations.length).toBeGreaterThan(0);
+    expect(summary.recommendations).toContain(
+      "Keep refund, fake-product, legal, fraud, and discount-negotiation replies behind seller approval."
+    );
+  });
+
+  it("recommends the most-interested product instead of always using the first catalog item", () => {
+    const auditEvents = [
+      viewerEvent("How much is the Travel Cable Pouch?", "en"),
+      viewerEvent("Is the cable organizer in stock?", "en")
+    ].flatMap((event) => routeRuntimeEvent(event, validLiveSessionSpec).auditEvents);
+
+    const summary = summarizeStream(validLiveSessionSpec, auditEvents);
+
+    expect(summary.recommendations[0]).toContain("Travel Cable Pouch");
   });
 });

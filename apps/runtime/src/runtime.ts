@@ -1,4 +1,5 @@
 import {
+  type ApprovalRequest,
   type AuditEvent,
   type ContextEnvelope,
   type LiveAction,
@@ -26,6 +27,7 @@ import {
 import { applyOverlayActions, createInitialOverlayState } from "./overlay";
 
 const now = () => new Date().toISOString();
+const approvalExpiry = () => new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
 export type RuntimeRouteOptions = {
   previousOverlayState?: ReturnType<typeof createInitialOverlayState>;
@@ -233,6 +235,7 @@ function decideViewerChatActions(context: ContextEnvelope): LiveAction[] {
         reason: decision.reason,
         citations,
         requiresApproval: true,
+        approvalId: `approval-${event.eventId}-draft_reply`,
         payload: {
           kind: "draft_reply",
           viewerId: event.payload.viewerId,
@@ -262,7 +265,7 @@ function decideViewerChatActions(context: ContextEnvelope): LiveAction[] {
           prompt: "Viewer is negotiating a discount. Confirm whether this is Shopee-backed before posting.",
           proposedPublicText:
             "The current promo is the Live Flash 10% Off deal shown on stream; seller will confirm if extra vouchers apply.",
-          expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+          expiresAt: approvalExpiry()
         }
       })
     ];
@@ -278,6 +281,7 @@ function decideViewerChatActions(context: ContextEnvelope): LiveAction[] {
       reason: decision.reason,
       citations,
       requiresApproval: true,
+      approvalId: `approval-${event.eventId}-escalate`,
       payload: {
         kind: "escalate",
         severity: decision.risk === "blocked" ? "blocked" : "high",
@@ -448,6 +452,18 @@ export function createAuditEvents(
     context
   });
 
+  const policyEvents = context.policyFlags.map((policyFlag) =>
+    AuditEventSchema.parse({
+      auditId: `audit-${event.eventId}-policy-${policyFlag.rule}`,
+      sessionId: event.sessionId,
+      timestamp: now(),
+      kind: "policy",
+      actor: "runtime",
+      reason: policyFlag.reason,
+      context
+    })
+  );
+
   const actionEvents = actions.map((action) =>
     AuditEventSchema.parse({
       auditId: `audit-${action.actionId}`,
@@ -460,7 +476,39 @@ export function createAuditEvents(
     })
   );
 
-  return [input, contextEvent, ...actionEvents];
+  const approvalEvents = actions
+    .filter((action) => action.requiresApproval)
+    .map((action) => {
+      const approval = buildApprovalRequest(action);
+      return AuditEventSchema.parse({
+        auditId: `audit-${approval.approvalId}`,
+        sessionId: event.sessionId,
+        timestamp: now(),
+        kind: "approval",
+        actor: "runtime",
+        reason: approval.reason,
+        approval
+      });
+    });
+
+  return [input, contextEvent, ...policyEvents, ...actionEvents, ...approvalEvents];
+}
+
+function buildApprovalRequest(action: LiveAction): ApprovalRequest {
+  const approvalId = action.approvalId ?? `approval-${action.actionId}`;
+  const expiresAt =
+    action.payload.kind === "request_approval" ? action.payload.expiresAt : approvalExpiry();
+
+  return {
+    approvalId,
+    actionId: action.actionId,
+    sessionId: action.sessionId,
+    status: "pending",
+    originalAction: action,
+    requestedAt: now(),
+    reason: action.reason,
+    expiresAt
+  };
 }
 
 async function applyRuntimeServices(
