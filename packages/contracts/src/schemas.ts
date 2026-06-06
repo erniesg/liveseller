@@ -607,14 +607,22 @@ export const ShopeeStartLivestreamCommandSchema = z
     createdAt: z.string().datetime(),
     approvalId: z.string().min(1),
     approvalStatus: z.literal("approved"),
-    safetyMode: z.literal("dry_run"),
+    safetyMode: z.literal("create_session_capture_credentials"),
     payload: z
       .object({
         title: z.string().min(1),
         productIds: z.array(z.string().min(1)).min(1),
         publicOverlayUrl: z.string().min(1),
-        streamCredentialHandling: z.literal("manual_or_server_env_only"),
-        rtmpEvidence: z.literal("redacted"),
+        shopeeSetupSteps: z.array(
+          z.enum([
+            "open_live_center",
+            "create_live_session",
+            "capture_stream_credentials",
+            "bind_public_overlay_preview"
+          ])
+        ).min(1),
+        streamCredentialHandling: z.literal("transient_capture_redacted_evidence"),
+        credentialEvidence: z.literal("redacted_presence_only"),
         cameraPreviewRequired: z.boolean(),
         goLive: z.literal(false)
       })

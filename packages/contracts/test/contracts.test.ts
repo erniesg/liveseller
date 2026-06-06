@@ -106,8 +106,18 @@ describe("contract freeze", () => {
     expect(validShopeeStartLivestreamCommand).toMatchObject({
       kind: "prepare_livestream",
       approvalStatus: "approved",
-      safetyMode: "dry_run"
+      safetyMode: "create_session_capture_credentials"
     });
+    expect(validShopeeStartLivestreamCommand.payload.shopeeSetupSteps).toEqual([
+      "open_live_center",
+      "create_live_session",
+      "capture_stream_credentials",
+      "bind_public_overlay_preview"
+    ]);
+    expect(validShopeeStartLivestreamCommand.payload.streamCredentialHandling).toBe(
+      "transient_capture_redacted_evidence"
+    );
+    expect(validShopeeStartLivestreamCommand.payload.goLive).toBe(false);
     expect(JSON.stringify(validShopeeStartLivestreamCommand).toLowerCase()).not.toContain("streamkey");
     expect(JSON.stringify(validShopeeStartLivestreamCommand).toLowerCase()).not.toContain("rtmp://");
     expect(() =>

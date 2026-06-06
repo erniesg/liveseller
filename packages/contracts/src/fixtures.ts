@@ -967,13 +967,19 @@ export const validShopeeStartLivestreamCommand: ShopeeStartLivestreamCommand = {
   createdAt: "2026-06-06T02:45:00.000Z",
   approvalId: "approval-prepare-livestream-vintage-jewelry",
   approvalStatus: "approved",
-  safetyMode: "dry_run",
+  safetyMode: "create_session_capture_credentials",
   payload: {
     title: vintageJewelryLiveSessionSpec.title,
     productIds: vintageJewelryLiveSessionSpec.products.map((product) => product.id),
     publicOverlayUrl: "/?runtimeOrigin=http%3A%2F%2F127.0.0.1%3A8787&sessionId=live-vintage-jewelry-001",
-    streamCredentialHandling: "manual_or_server_env_only",
-    rtmpEvidence: "redacted",
+    shopeeSetupSteps: [
+      "open_live_center",
+      "create_live_session",
+      "capture_stream_credentials",
+      "bind_public_overlay_preview"
+    ],
+    streamCredentialHandling: "transient_capture_redacted_evidence",
+    credentialEvidence: "redacted_presence_only",
     cameraPreviewRequired: true,
     goLive: false
   },

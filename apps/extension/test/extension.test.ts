@@ -82,14 +82,24 @@ describe("Shopee extension command safety", () => {
     expect(pending.command).toBeUndefined();
   });
 
-  it("dry-runs livestream setup without exposing RTMP secrets or pressing go live", () => {
-    const dryRun = executeShopeeStartLivestreamCommand(validShopeeStartLivestreamCommand);
+  it("prepares Shopee livestream creation with redacted stream credential evidence", () => {
+    const prepared = executeShopeeStartLivestreamCommand(validShopeeStartLivestreamCommand);
 
-    expect(dryRun.toolResult.status).toBe("applied");
-    expect(dryRun.command?.safetyMode).toBe("dry_run");
-    expect(dryRun.command?.payload.goLive).toBe(false);
-    expect(JSON.stringify(dryRun).toLowerCase()).not.toContain("streamkey");
-    expect(JSON.stringify(dryRun).toLowerCase()).not.toContain("rtmp://");
+    expect(prepared.toolResult.status).toBe("applied");
+    expect(prepared.command?.safetyMode).toBe("create_session_capture_credentials");
+    expect(prepared.command?.payload.shopeeSetupSteps).toContain("capture_stream_credentials");
+    expect(prepared.command?.payload.goLive).toBe(false);
+    expect(prepared.setupEvidence).toMatchObject({
+      liveSessionCreated: true,
+      credentialEvidence: {
+        serverUrl: "present_redacted",
+        secretToken: "present_redacted"
+      },
+      publicOverlayReady: true,
+      goLivePressed: false
+    });
+    expect(JSON.stringify(prepared).toLowerCase()).not.toContain("streamkey");
+    expect(JSON.stringify(prepared).toLowerCase()).not.toContain("rtmp://");
 
     const withSecret = executeShopeeStartLivestreamCommand({
       ...validShopeeStartLivestreamCommand,

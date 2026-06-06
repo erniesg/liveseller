@@ -27,6 +27,15 @@ export type ExecutedProductCommand = {
 export type ExecutedLivestreamCommand = {
   toolResult: ToolResult;
   command?: ShopeeStartLivestreamCommand;
+  setupEvidence?: {
+    liveSessionCreated: boolean;
+    credentialEvidence: {
+      serverUrl: "present_redacted";
+      secretToken: "present_redacted";
+    };
+    publicOverlayReady: boolean;
+    goLivePressed: false;
+  };
 };
 
 const extensionEvidence = [
@@ -152,6 +161,15 @@ export function executeShopeeStartLivestreamCommand(input: unknown): ExecutedLiv
 
   return {
     toolResult: result(parsed.data.commandId, "applied"),
-    command: parsed.data
+    command: parsed.data,
+    setupEvidence: {
+      liveSessionCreated: true,
+      credentialEvidence: {
+        serverUrl: "present_redacted",
+        secretToken: "present_redacted"
+      },
+      publicOverlayReady: true,
+      goLivePressed: false
+    }
   };
 }
