@@ -163,6 +163,13 @@ function fillShopeeCreateProductForm(command, options = {}) {
   function write(selectors, value) {
     for (const selector of selectors) {
       const element = document.querySelector(selector);
+      if (element?.isContentEditable) {
+        element.focus?.();
+        element.textContent = String(value);
+        element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: String(value) }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        return selector;
+      }
       if (element && ("value" in element)) {
         setNativeValue(element, value);
         return selector;
@@ -171,26 +178,65 @@ function fillShopeeCreateProductForm(command, options = {}) {
     return undefined;
   }
 
+  function clickElement(element) {
+    element.scrollIntoView?.({ block: "center", inline: "center" });
+    element.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, cancelable: true, view: window }));
+    element.click?.();
+  }
+
   function visible(element) {
     const rect = element.getBoundingClientRect();
     const style = getComputedStyle(element);
     return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
   }
 
-  function findSectionByText(labels) {
-    const normalized = labels.map((label) => String(label).toLowerCase());
-    return Array.from(document.querySelectorAll("section, div, label")).find((element) => {
+  function findTextElement(labels) {
+    const normalized = labels.map((label) => String(label).replace(/\s+/g, " ").trim().toLowerCase());
+    return Array.from(document.querySelectorAll("label, div, span, p")).find((element) => {
       const text = String(element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-      return visible(element) && normalized.some((label) => text.includes(label));
+      return visible(element) &&
+        text.length > 0 &&
+        text.length <= 80 &&
+        normalized.some((label) => text === label || text.includes(label));
     });
+  }
+
+  function findSectionByText(labels) {
+    const label = findTextElement(labels);
+    if (!label) {
+      return undefined;
+    }
+    let current = label;
+    for (let depth = 0; current && depth < 5; depth += 1) {
+      const fields = current.querySelectorAll?.("input:not([type='hidden']):not([type='file']), textarea, [contenteditable='true']");
+      if (fields?.length) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return label.parentElement || label;
   }
 
   function writeNearLabel(labels, value, fieldName, selectors = "input, textarea, [contenteditable='true']") {
     const section = findSectionByText(labels);
-    const candidates = [
-      ...(section ? Array.from(section.querySelectorAll(selectors)) : []),
-      ...Array.from(document.querySelectorAll(selectors))
-    ].filter((element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable);
+    if (!section) {
+      return undefined;
+    }
+    const candidates = Array.from(section.querySelectorAll(selectors))
+      .filter((element) =>
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element.isContentEditable
+      )
+      .filter((element) => {
+        if (element instanceof HTMLInputElement && ["hidden", "file", "radio", "checkbox"].includes(element.type)) {
+          return false;
+        }
+        return true;
+      });
     const target = candidates.find((element) => visible(element) && !element.disabled && element.getAttribute("aria-disabled") !== "true");
     if (!target) {
       return undefined;
@@ -269,18 +315,39 @@ function fillShopeeCreateProductForm(command, options = {}) {
     if (files.length === 0) {
       return { selector: undefined, count: 0 };
     }
-    const input = document.querySelector("input[type='file'][accept*='image'], input[type='file']");
-    if (!(input instanceof HTMLInputElement)) {
+    const inputs = Array.from(document.querySelectorAll("input[type='file'][accept*='image'], input[type='file']"))
+      .filter((input) => input instanceof HTMLInputElement);
+    if (inputs.length === 0) {
+      return { selector: undefined, count: 0 };
+    }
+    const productImageInput = inputs.find((input) => {
+      const text = String(input.closest(".product-basic-info, .edit-row, .eds-upload, .image-manager-wrapper")?.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+      const accept = String(input.getAttribute("accept") || "").toLowerCase();
+      return accept.includes("image") &&
+        text.includes("add image") &&
+        !text.includes("promotion image") &&
+        !text.includes("add video") &&
+        !text.includes("local upload") &&
+        !text.includes("image creator");
+    }) || inputs.find((input) => {
+      const accept = String(input.getAttribute("accept") || "").toLowerCase();
+      const text = String(input.closest(".eds-upload, .edit-row")?.textContent || "").toLowerCase();
+      return accept.includes("image") && !text.includes("0/1") && !text.includes("local upload");
+    });
+    if (!productImageInput) {
       return { selector: undefined, count: 0 };
     }
     const transfer = new DataTransfer();
     for (const file of files) {
       transfer.items.add(file);
     }
-    input.files = transfer.files;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    return { selector: "input[type='file']", count: files.length };
+    productImageInput.files = transfer.files;
+    productImageInput.dispatchEvent(new Event("input", { bubbles: true }));
+    productImageInput.dispatchEvent(new Event("change", { bubbles: true }));
+    return { selector: "input[type='file'][accept*='image']", count: files.length, targets: 1 };
   }
 
   const product = command?.payload?.product;
@@ -298,13 +365,20 @@ function fillShopeeCreateProductForm(command, options = {}) {
       write([
         "[name='product_name']",
         "[name='name']",
-        "input[maxlength='120']",
         "input[placeholder*='Product Name' i]",
         "input[placeholder*='product name' i]",
         "input[placeholder*='Brand Name' i]",
         "input[placeholder*='Product Type' i]"
-      ], product.title) || writeNearLabel(["product name"], product.title, "title", "input"),
-      write(["textarea[name='description']", "[name='description']", "textarea[placeholder*='description' i]"], product.description)
+      ], product.title)
+        || writeNearLabel(["product name"], product.title, "title", "input")
+        || write(["input[maxlength='120']"], product.title),
+      write([
+        ".product-description-panel .ql-editor",
+        ".product-description .ql-editor",
+        "textarea[name='description']",
+        "[name='description']",
+        "textarea[placeholder*='description' i]"
+      ], product.description)
         || writeNearLabel(["product description", "description"], product.description, "description", "textarea, [contenteditable='true']"),
       write(["[name='sku']", "input[placeholder*='sku' i]"], product.sku)
     );
@@ -340,6 +414,71 @@ function fillShopeeCreateProductForm(command, options = {}) {
       : false,
     title: document.title,
     url: location.href
+  };
+}
+
+async function selectShopeeProductCategory(command) {
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  function visible(element) {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  }
+  function textOf(element) {
+    return String(element.textContent || "").replace(/\s+/g, " ").trim();
+  }
+  function clickElement(element) {
+    element.scrollIntoView?.({ block: "center", inline: "center" });
+    element.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, cancelable: true, view: window }));
+    element.click?.();
+  }
+  const product = command?.payload?.product;
+  const requestedCategory = String(product?.category || "").toLowerCase();
+  const current = document.querySelector(".product-category-text, .product-category-box-inner");
+  const currentText = current ? textOf(current) : "";
+  if (currentText && !/please set category/i.test(currentText)) {
+    return { ok: true, selected: currentText, alreadySelected: true };
+  }
+
+  const categoryControl = document.querySelector(".product-category-box-inner, .product-category-box, [class*='product-category']");
+  if (categoryControl) {
+    clickElement(categoryControl);
+    await delay(500);
+  }
+
+  const candidates = Array.from(document.querySelectorAll("li, button, a, div, span"))
+    .filter((element) => visible(element))
+    .map((element) => ({ element, text: textOf(element) }))
+    .filter((candidate) =>
+      candidate.text.length > 4 &&
+      candidate.text.length <= 140 &&
+      candidate.text.includes(">") &&
+      !/please set category|recently used$/i.test(candidate.text)
+    );
+  const categoryWords = requestedCategory
+    .split(/[^a-z0-9]+/i)
+    .filter((word) => word.length >= 4)
+    .map((word) => word.replace("jewellery", "jewelry"));
+  const preferred = candidates.find((candidate) => {
+    const text = candidate.text.toLowerCase().replace("jewellery", "jewelry");
+    return categoryWords.some((word) => text.includes(word));
+  }) || candidates[0];
+  if (!preferred) {
+    return { ok: false, error: "category_option_not_found", requestedCategory };
+  }
+  clickElement(preferred.element);
+  await delay(1000);
+  const selected = textOf(document.querySelector(".product-category-text, .product-category-box-inner") || preferred.element);
+  return {
+    ok: selected.length > 0 && !/please set category/i.test(selected),
+    selected,
+    requestedCategory,
+    clicked: preferred.text
   };
 }
 
@@ -554,6 +693,14 @@ async function fillShopeeProductDraft(tab, command, options = {}) {
     args: [command, { section: "basic", submit: false, skipImages: options.submit === true }]
   });
   steps.push({ step: "basic", result: result?.result });
+
+  [result] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: selectShopeeProductCategory,
+    args: [command]
+  });
+  steps.push({ step: "category", result: result?.result });
+  await delay(1200);
 
   [result] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },

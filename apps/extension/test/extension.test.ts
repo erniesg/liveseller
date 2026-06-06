@@ -682,6 +682,10 @@ describe("Shopee extension command safety", () => {
     expect(background).toContain("liveseller:prepare-shopee-test-preview");
     expect(background).toContain("liveseller:confirm-product-publish");
     expect(background).toContain("fillShopeeProductDraft");
+    expect(background).toContain("selectShopeeProductCategory");
+    expect(background).toContain(".product-category-box-inner");
+    expect(background).toContain(".product-basic-info");
+    expect(background).toContain("input[type='file'][accept*='image']");
     expect(background).toContain("clickShopeeProductSection");
     expect(background).toContain("productCreationTabId");
     expect(background).toContain("productAutomationInFlight");
