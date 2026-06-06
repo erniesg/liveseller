@@ -734,6 +734,16 @@ export const ToolResultEventSchema = RuntimeEventBaseSchema.extend({
   payload: ToolResultSchema
 });
 
+export const StreamLifecycleEventSchema = RuntimeEventBaseSchema.extend({
+  type: z.literal("stream_lifecycle"),
+  payload: z
+    .object({
+      status: z.enum(["started", "closed"]),
+      reason: z.string().min(1).optional()
+    })
+    .strict()
+});
+
 export const RuntimeEventSchema = z.discriminatedUnion("type", [
   ViewerChatEventSchema,
   HostTranscriptEventSchema,
@@ -741,9 +751,64 @@ export const RuntimeEventSchema = z.discriminatedUnion("type", [
   ProductSwitchEventSchema,
   PromoUpdateEventSchema,
   MetricUpdateEventSchema,
-  ToolResultEventSchema
+  ToolResultEventSchema,
+  StreamLifecycleEventSchema
 ]);
 export type RuntimeEvent = z.infer<typeof RuntimeEventSchema>;
+
+export const StreamMomentSchema = z
+  .object({
+    momentId: z.string().min(1),
+    sessionId: z.string().min(1),
+    eventId: z.string().min(1),
+    timestamp: z.string().datetime(),
+    kind: z.enum([
+      "viewer_question",
+      "host_caption",
+      "product_switch",
+      "promo_update",
+      "approval_required",
+      "risk_escalation",
+      "performance_signal",
+      "lifecycle"
+    ]),
+    title: z.string().min(1),
+    detail: z.string().min(1),
+    productId: z.string().min(1).optional(),
+    promoId: z.string().min(1).optional(),
+    risk: RiskLevelSchema.optional(),
+    actionIds: z.array(z.string().min(1)),
+    auditIds: z.array(z.string().min(1)),
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict();
+export type StreamMoment = z.infer<typeof StreamMomentSchema>;
+
+export const RollingStreamSummarySchema = z
+  .object({
+    summaryId: z.string().min(1),
+    sessionId: z.string().min(1),
+    status: z.enum(["active", "closed"]),
+    checkpointSeq: z.number().int().nonnegative(),
+    updatedAt: z.string().datetime(),
+    eventCount: z.number().int().nonnegative(),
+    auditEventCount: z.number().int().nonnegative(),
+    actionCount: z.number().int().nonnegative(),
+    publicReplies: z.number().int().nonnegative(),
+    drafts: z.number().int().nonnegative(),
+    escalations: z.number().int().nonnegative(),
+    approvalsRequested: z.number().int().nonnegative(),
+    orders: z.number().int().nonnegative(),
+    viewerPeak: z.number().int().nonnegative(),
+    currentProductId: z.string().min(1).optional(),
+    currentPromoId: z.string().min(1).optional(),
+    topQuestions: z.array(z.string().min(1)),
+    moments: z.array(StreamMomentSchema),
+    recommendations: z.array(z.string().min(1)),
+    finalizedAt: z.string().datetime().optional()
+  })
+  .strict();
+export type RollingStreamSummary = z.infer<typeof RollingStreamSummarySchema>;
 
 export const ViewerMemorySchema = z
   .object({

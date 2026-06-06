@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -313,6 +314,43 @@ describe("prep catalog brain", () => {
         })
       ])
     );
+  });
+
+  it("ingests a zipped seller material folder into a reviewable product plan", () => {
+    const root = mkdtempSync(join(tmpdir(), "liveseller-zipped-material-"));
+    const sourceFolder = join(root, "seller-drop");
+    mkdirSync(sourceFolder);
+    const fileNames = ["custom-strap.jpg"];
+    writeFileSync(join(sourceFolder, fileNames[0]!), "fixture image bytes");
+    writeFileSync(join(sourceFolder, "seller-notes.md"), "# Camera strap\nUse exact structured price.");
+    execFileSync("zip", ["-qr", join(root, "seller-drop.zip"), "seller-drop"], { cwd: root });
+
+    const product = customDropProduct(fileNames);
+    const result = buildSellerMaterialIngestion(join(root, "seller-drop.zip"), {
+      products: [product],
+      liveSessionSpec: {
+        ...vintageJewelryLiveSessionSpec,
+        sessionId: "live-zipped-material-001",
+        products: [product]
+      }
+    });
+
+    expect(result.ingestedFiles.map((file) => file.kind).sort()).toEqual([
+      "archive",
+      "document",
+      "image"
+    ]);
+    expect(result.productReviewPlan.items[0]?.productId).toBe("prod-custom-camera-strap");
+    expect(result.productReviewPlan.generationTasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskType: "image_edit",
+          status: "pending",
+          inputRefs: product.media.images.map((image) => image.uri)
+        })
+      ])
+    );
+    expect(() => ProductReviewPlanSchema.parse(result.productReviewPlan)).not.toThrow();
   });
 
   it("applies AI draft updates without changing locked structured product facts", () => {

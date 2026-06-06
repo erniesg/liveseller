@@ -3,7 +3,8 @@ import type { Readable, Writable } from "node:stream";
 import type {
   CodexAppServerTransport,
   CodexJsonRpcMessage,
-  CodexJsonRpcRequest
+  CodexJsonRpcRequest,
+  CodexJsonRpcSuccessResponse
 } from "./codexAppServerReview";
 
 export type JsonLineCodexAppServerTransportOptions = {
@@ -29,7 +30,7 @@ type QueueItem =
 
 function parseJsonRpcLine(line: string): CodexJsonRpcMessage {
   const parsed = JSON.parse(line) as unknown;
-  if (!parsed || typeof parsed !== "object" || !("method" in parsed)) {
+  if (!parsed || typeof parsed !== "object" || (!("method" in parsed) && !("id" in parsed))) {
     throw new Error("Codex app-server transport received a non-JSON-RPC message");
   }
   return parsed as CodexJsonRpcMessage;
@@ -84,7 +85,7 @@ export function createJsonLineCodexAppServerTransport(
   });
 
   return {
-    async send(message: CodexJsonRpcRequest): Promise<void> {
+    async send(message: CodexJsonRpcRequest | CodexJsonRpcSuccessResponse): Promise<void> {
       await new Promise<void>((resolve, reject) => {
         options.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
           if (error) {

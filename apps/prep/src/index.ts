@@ -1,5 +1,7 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, relative } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   type AiDraftUpdate,
@@ -92,7 +94,7 @@ export type IngestedSellerFile = {
   fileName: string;
   absolutePath: string;
   relativePath: string;
-  kind: "image" | "document" | "other";
+  kind: "image" | "document" | "archive" | "other";
   sizeBytes: number;
 };
 
@@ -184,10 +186,42 @@ function fileKind(fileName: string): IngestedSellerFile["kind"] {
   if (supportedImageExtensions.has(extension)) {
     return "image";
   }
+  if (extension === ".zip") {
+    return "archive";
+  }
   if (supportedDocumentExtensions.has(extension)) {
     return "document";
   }
   return "other";
+}
+
+function extractSellerMaterialArchive(inputPath: string): string {
+  if (extname(inputPath).toLowerCase() !== ".zip") {
+    return inputPath;
+  }
+
+  const extractDir = mkdtempSync(join(tmpdir(), "liveseller-zip-"));
+  execFileSync("unzip", ["-q", inputPath, "-d", extractDir]);
+  return extractDir;
+}
+
+function sellerMaterialExtractionFolder(materialPath: string): string {
+  const stats = statSync(materialPath);
+  if (!stats.isDirectory()) {
+    return dirname(materialPath);
+  }
+
+  const directEntries = readdirSync(materialPath).map((entry) => join(materialPath, entry));
+  const hasDirectImage = directEntries.some((entry) =>
+    statSync(entry).isFile() && supportedImageExtensions.has(extname(entry).toLowerCase())
+  );
+  const childDirectories = directEntries.filter((entry) => statSync(entry).isDirectory());
+
+  if (!hasDirectImage && childDirectories.length === 1) {
+    return childDirectories[0]!;
+  }
+
+  return materialPath;
 }
 
 export function discoverSellerMaterialFiles(inputPath: string): IngestedSellerFile[] {
@@ -754,9 +788,13 @@ export function buildSellerMaterialIngestion(
   inputPath = DEFAULT_SELLER_DROP_FOLDER,
   options: SellerDropFolderExtractionOptions = {}
 ): SellerMaterialIngestionResult {
-  const ingestedFiles = discoverSellerMaterialFiles(inputPath);
-  const inputStats = statSync(inputPath);
-  const extractionFolder = inputStats.isDirectory() ? inputPath : dirname(inputPath);
+  const materialPath = extractSellerMaterialArchive(inputPath);
+  const archiveFiles = materialPath === inputPath ? [] : discoverSellerMaterialFiles(inputPath);
+  const ingestedFiles = [
+    ...archiveFiles,
+    ...discoverSellerMaterialFiles(materialPath)
+  ];
+  const extractionFolder = sellerMaterialExtractionFolder(materialPath);
   const extraction = buildSellerDropFolderExtraction(extractionFolder, options);
   const productIdentityDrafts = buildProductIdentityDrafts(
     extraction.products,

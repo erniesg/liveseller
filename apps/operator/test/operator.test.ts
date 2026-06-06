@@ -163,10 +163,9 @@ describe("Codex app-server operator review loop", () => {
       expect.objectContaining({ method: "thread/start" }),
       expect.objectContaining({ method: "turn/start" }),
       expect.objectContaining({
-        method: "item/tool/result",
-        params: expect.objectContaining({
-          callId: "call-record-response-001",
-          content: expect.arrayContaining([expect.objectContaining({ type: "text" })])
+        result: expect.objectContaining({
+          contentItems: expect.arrayContaining([expect.objectContaining({ type: "inputText" })]),
+          success: true
         })
       })
     ]);

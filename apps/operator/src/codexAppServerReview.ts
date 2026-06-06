@@ -129,13 +129,35 @@ export type CodexJsonRpcRequest = {
   params?: Record<string, unknown>;
 };
 
-export type CodexJsonRpcMessage = CodexJsonRpcRequest | ServerRequest | ServerNotification;
+export type CodexJsonRpcSuccessResponse = {
+  id?: number;
+  result: unknown;
+};
+
+export type CodexJsonRpcResponse = {
+  id: number;
+  result?: unknown;
+  error?: unknown;
+};
+
+export type CodexJsonRpcMessage =
+  | CodexJsonRpcRequest
+  | CodexJsonRpcResponse
+  | ServerRequest
+  | ServerNotification;
 
 export type CodexReviewTurnOptions = {
   cwd: string;
-  threadId: string;
+  threadId?: string;
   reviewPlan: ProductReviewPlan;
   sellerText: string;
+  onTrace?: (event: {
+    direction: "in" | "out" | "operator";
+    method?: string;
+    id?: number;
+    message?: string;
+    payload?: unknown;
+  }) => void;
 };
 
 export type CodexReviewTurnMessages = {
@@ -149,7 +171,7 @@ export type CodexReviewTurnMessages = {
   };
   turnStart: CodexJsonRpcRequest & {
     params: {
-      threadId: string;
+      threadId?: string;
       input: Array<{ type: "text"; text: string }>;
     };
   };
@@ -178,11 +200,12 @@ export type CodexOperatorEvent = {
 };
 
 export type CodexAppServerTransport = {
-  send(message: CodexJsonRpcRequest): Promise<void>;
+  send(message: CodexJsonRpcRequest | CodexJsonRpcSuccessResponse): Promise<void>;
   events(): AsyncIterable<CodexJsonRpcMessage>;
 };
 
 export type CodexReviewSessionResult = CodexReviewToolState & {
+  threadId?: string;
   operatorEvents: CodexOperatorEvent[];
 };
 
@@ -257,6 +280,52 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function withDefaultCitations<T extends Record<string, unknown>>(value: T): T & { citations: unknown[] } {
+  return {
+    ...value,
+    citations: Array.isArray(value.citations) ? value.citations : []
+  };
+}
+
+function normalizeReviewToolArguments(call: CodexReviewToolCall): unknown {
+  const args = asRecord(call.arguments);
+  if (!args) {
+    return call.arguments;
+  }
+
+  if (call.tool === "liveseller_record_seller_review_response") {
+    const response = asRecord(args.response);
+    return response
+      ? {
+          ...args,
+          response: withDefaultCitations(response)
+        }
+      : call.arguments;
+  }
+
+  if (call.tool === "liveseller_apply_ai_draft_update") {
+    const update = asRecord(args.update);
+    return update
+      ? {
+          ...args,
+          update: withDefaultCitations(update)
+        }
+      : call.arguments;
+  }
+
+  if (call.tool === "liveseller_record_product_review_decision") {
+    const decision = asRecord(args.decision);
+    return decision
+      ? {
+          ...args,
+          decision: withDefaultCitations(decision)
+        }
+      : call.arguments;
+  }
+
+  return call.arguments;
+}
+
 function isReviewToolName(value: unknown): value is CodexReviewToolName {
   return typeof value === "string" && LIVESELLER_CODEX_REVIEW_TOOLS.some((tool) => tool.name === value);
 }
@@ -291,6 +360,26 @@ function isTurnCompleted(message: CodexJsonRpcMessage): boolean {
   return asRecord(message)?.method === "turn/completed";
 }
 
+function readResponse(message: CodexJsonRpcMessage, id: number): CodexJsonRpcResponse | undefined {
+  const record = asRecord(message);
+  if (record?.id !== id) {
+    return undefined;
+  }
+  if ("error" in record && record.error) {
+    throw new Error(`Codex app-server request ${id} failed: ${JSON.stringify(record.error)}`);
+  }
+  return record as CodexJsonRpcResponse;
+}
+
+function threadIdFromThreadStart(response: CodexJsonRpcResponse): string {
+  const result = asRecord(response.result);
+  const thread = asRecord(result?.thread);
+  if (typeof thread?.id !== "string" || thread.id.length === 0) {
+    throw new Error("Codex app-server thread/start response did not include thread.id");
+  }
+  return thread.id;
+}
+
 export function buildCodexAppServerReviewTurn(options: CodexReviewTurnOptions): CodexReviewTurnMessages {
   return {
     initialize: {
@@ -316,7 +405,11 @@ export function buildCodexAppServerReviewTurn(options: CodexReviewTurnOptions): 
       method: "thread/start",
       params: {
         cwd: options.cwd,
-        dynamicTools: LIVESELLER_CODEX_REVIEW_TOOLS
+        dynamicTools: LIVESELLER_CODEX_REVIEW_TOOLS,
+        approvalPolicy: "never",
+        sandbox: "read-only",
+        experimentalRawEvents: false,
+        persistExtendedHistory: false
       }
     },
     turnStart: {
@@ -339,13 +432,14 @@ export async function executeCodexReviewToolCall(
   state: CodexReviewToolState,
   call: CodexReviewToolCall
 ): Promise<CodexReviewToolResult> {
+  const normalizedArguments = normalizeReviewToolArguments(call);
   const parsedState: CodexReviewToolState = {
     reviewPlan: ProductReviewPlanSchema.parse(state.reviewPlan),
     createProductCommands: state.createProductCommands
   };
 
   if (call.tool === "liveseller_record_seller_review_response") {
-    const args = SellerResponseArgsSchema.parse(call.arguments) as { response: SellerFreeFormReviewResponse };
+    const args = SellerResponseArgsSchema.parse(normalizedArguments) as { response: SellerFreeFormReviewResponse };
     const nextState = {
       ...parsedState,
       reviewPlan: recordSellerReviewResponse(parsedState.reviewPlan, args.response)
@@ -354,7 +448,7 @@ export async function executeCodexReviewToolCall(
   }
 
   if (call.tool === "liveseller_apply_ai_draft_update") {
-    const args = AiDraftUpdateArgsSchema.parse(call.arguments) as { update: AiDraftUpdate };
+    const args = AiDraftUpdateArgsSchema.parse(normalizedArguments) as { update: AiDraftUpdate };
     const nextState = {
       ...parsedState,
       reviewPlan: applyAiDraftUpdate(parsedState.reviewPlan, args.update)
@@ -363,7 +457,7 @@ export async function executeCodexReviewToolCall(
   }
 
   if (call.tool === "liveseller_run_generation_tasks") {
-    const args = GenerationTaskArgsSchema.parse(call.arguments);
+    const args = GenerationTaskArgsSchema.parse(normalizedArguments);
     const outputs = new Map(args.taskOutputs.map((output) => [output.taskId, output]));
     const reviewPlan = await runPendingPrepGenerationTasks(
       parsedState.reviewPlan,
@@ -382,7 +476,7 @@ export async function executeCodexReviewToolCall(
   }
 
   if (call.tool === "liveseller_record_product_review_decision") {
-    const args = ProductReviewDecisionArgsSchema.parse(call.arguments) as { decision: ProductReviewDecision };
+    const args = ProductReviewDecisionArgsSchema.parse(normalizedArguments) as { decision: ProductReviewDecision };
     const nextState = {
       ...parsedState,
       reviewPlan: recordProductReviewDecision(parsedState.reviewPlan, args.decision)
@@ -411,9 +505,17 @@ export async function runCodexAppServerReviewSession(
     reviewPlan: ProductReviewPlanSchema.parse(options.reviewPlan),
     createProductCommands: []
   };
+  let threadId = options.threadId;
 
-  for (const message of [turn.initialize, turn.initialized, turn.threadStart, turn.turnStart]) {
-    await transport.send(message);
+  await transport.send(turn.initialize);
+  options.onTrace?.({ direction: "out", method: turn.initialize.method, id: turn.initialize.id });
+  await transport.send(turn.initialized);
+  options.onTrace?.({ direction: "out", method: turn.initialized.method, id: turn.initialized.id });
+  await transport.send(turn.threadStart);
+  options.onTrace?.({ direction: "out", method: turn.threadStart.method, id: turn.threadStart.id });
+  if (options.threadId) {
+    await transport.send(turn.turnStart);
+    options.onTrace?.({ direction: "out", method: turn.turnStart.method, id: turn.turnStart.id });
   }
 
   operatorEvents.push(operatorEvent({
@@ -421,7 +523,32 @@ export async function runCodexAppServerReviewSession(
     message: "Codex app-server review session started."
   }));
 
+  let turnStarted = Boolean(options.threadId);
+
   for await (const message of transport.events()) {
+    const inbound = asRecord(message);
+    options.onTrace?.({
+      direction: "in",
+      method: typeof inbound?.method === "string" ? inbound.method : undefined,
+      id: typeof inbound?.id === "number" ? inbound.id : undefined,
+      payload: message
+    });
+
+    const threadStartResponse = readResponse(message, 2);
+    if (threadStartResponse && !turnStarted) {
+      threadId = threadIdFromThreadStart(threadStartResponse);
+      await transport.send({
+        ...turn.turnStart,
+        params: {
+          ...turn.turnStart.params,
+          threadId
+        }
+      });
+      options.onTrace?.({ direction: "out", method: turn.turnStart.method, id: turn.turnStart.id });
+      turnStarted = true;
+      continue;
+    }
+
     const toolCall = readToolCall(message);
     if (toolCall) {
       operatorEvents.push(operatorEvent({
@@ -430,11 +557,46 @@ export async function runCodexAppServerReviewSession(
         tool: toolCall.tool,
         callId: toolCall.callId
       }));
-
-      const result = await executeCodexReviewToolCall(state, {
-        tool: toolCall.tool,
-        arguments: toolCall.arguments
+      options.onTrace?.({
+        direction: "operator",
+        method: "tool_call_received",
+        message: `Codex requested ${toolCall.tool}.`,
+        payload: {
+          tool: toolCall.tool,
+          callId: toolCall.callId,
+          arguments: toolCall.arguments
+        }
       });
+
+      let result: CodexReviewToolResult;
+      try {
+        result = await executeCodexReviewToolCall(state, {
+          tool: toolCall.tool,
+          arguments: toolCall.arguments
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await transport.send({
+          id: toolCall.id,
+          result: {
+            contentItems: [{ type: "inputText", text: `LiveSeller tool validation failed: ${message}` }],
+            success: false
+          }
+        });
+        options.onTrace?.({
+          direction: "out",
+          method: "item/tool/result",
+          id: toolCall.id,
+          message: `Rejected invalid arguments for ${toolCall.tool}: ${message}`
+        });
+        operatorEvents.push(operatorEvent({
+          type: "tool_result_sent",
+          message: `LiveSeller rejected invalid arguments for ${toolCall.tool}.`,
+          tool: toolCall.tool,
+          callId: toolCall.callId
+        }));
+        continue;
+      }
       state = {
         reviewPlan: result.reviewPlan,
         createProductCommands: result.createProductCommands
@@ -442,16 +604,19 @@ export async function runCodexAppServerReviewSession(
 
       await transport.send({
         id: toolCall.id,
-        method: "item/tool/result",
-        params: {
-          callId: toolCall.callId,
-          content: result.contentItems,
+        result: {
           contentItems: result.contentItems.map((item) => ({
             type: "inputText",
             text: item.text
           })),
           success: true
         }
+      });
+      options.onTrace?.({
+        direction: "out",
+        method: "item/tool/result",
+        id: toolCall.id,
+        message: `Returned validated result for ${toolCall.tool}.`
       });
 
       operatorEvents.push(operatorEvent({
@@ -474,6 +639,7 @@ export async function runCodexAppServerReviewSession(
 
   return {
     ...state,
+    threadId,
     operatorEvents
   };
 }
