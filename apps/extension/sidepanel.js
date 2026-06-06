@@ -1,7 +1,6 @@
 const translations = {
   en: {
-    eyebrow: "Shopee seller tool",
-    title: "Product Upload Assistant",
+    headerTitle: "Upload Assistant",
     stepImages: "Images",
     stepAi: "AI draft",
     stepApproval: "Approval",
@@ -38,8 +37,7 @@ const translations = {
       "AI detected the uploaded product images and prepared a seller-editable draft. Confirm product details, price, stock, and category before approving upload."
   },
   "zh-hant": {
-    eyebrow: "Shopee 賣家工具",
-    title: "商品上架助手",
+    headerTitle: "上架助手",
     stepImages: "圖片",
     stepAi: "AI 草稿",
     stepApproval: "審批",
@@ -76,8 +74,7 @@ const translations = {
       "AI 已根據上傳的商品圖片建立可編輯草稿。批准上架前，請確認商品資料、價格、庫存與類別。"
   },
   "zh-hans": {
-    eyebrow: "Shopee 卖家工具",
-    title: "商品上架助手",
+    headerTitle: "上架助手",
     stepImages: "图片",
     stepAi: "AI 草稿",
     stepApproval: "审批",

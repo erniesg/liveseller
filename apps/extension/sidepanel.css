@@ -1,14 +1,15 @@
 :root {
   --primary: #ee4d2d;
-  --primary-hover: #ff6f4f;
-  --primary-soft: #fff2e8;
-  --text: #1f1f1f;
-  --text-secondary: #595959;
-  --text-tertiary: #8c8c8c;
-  --border: #d9d9d9;
-  --border-light: #f0f0f0;
+  --primary-hover: #f05d40;
+  --primary-soft: #fff4f0;
+  --text: #333333;
+  --text-strong: #222222;
+  --text-secondary: #666666;
+  --text-tertiary: #999999;
+  --border: #dedede;
+  --border-light: #eeeeee;
   --surface: #ffffff;
-  --bg: #f5f5f5;
+  --bg: #f6f6f6;
   --success: #52c41a;
   --success-soft: #f6ffed;
   --warning: #faad14;
@@ -41,11 +42,11 @@ textarea {
 
 .shell {
   display: grid;
-  gap: 12px;
-  padding: 12px;
+  gap: 10px;
+  padding: 0 12px 14px;
 }
 
-.topbar,
+.seller-header,
 .card,
 .status,
 .approval-panel {
@@ -53,17 +54,49 @@ textarea {
   border-radius: 8px;
   background: var(--surface);
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.03),
-    0 6px 14px rgba(0, 0, 0, 0.04);
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 2px 8px rgba(0, 0, 0, 0.03);
 }
 
-.topbar {
+.seller-header {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: 10px;
-  align-items: start;
-  padding: 12px;
-  border-top: 3px solid var(--primary);
+  align-items: center;
+  margin: 0 -12px;
+  padding: 10px 12px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.seller-brand {
+  display: inline-grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 4px;
+  background: var(--primary);
+  color: #ffffff;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-tertiary);
+  font-size: 0.92rem;
+}
+
+.breadcrumb strong {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .eyebrow,
@@ -75,15 +108,16 @@ p {
 
 .eyebrow {
   color: var(--primary);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 h1 {
   margin-top: 3px;
-  font-size: 1.16rem;
-  font-weight: 650;
+  color: var(--text-strong);
+  font-size: 1.2rem;
+  font-weight: 600;
   line-height: 1.22;
 }
 
@@ -94,74 +128,86 @@ h2 {
 
 .language-switcher {
   display: grid;
-  grid-template-columns: repeat(3, 30px);
-  gap: 4px;
-  padding: 3px;
+  grid-template-columns: repeat(3, 28px);
+  gap: 0;
+  padding: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #fafafa;
+  border-radius: 4px;
+  background: #ffffff;
+  overflow: hidden;
 }
 
 .language-option {
-  min-height: 26px;
+  min-height: 27px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 0;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.78rem;
-  font-weight: 650;
+  font-size: 0.74rem;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .language-option.active {
   background: var(--primary);
   color: #ffffff;
-  box-shadow: 0 1px 3px rgba(238, 77, 45, 0.22);
+  box-shadow: none;
 }
 
 .steps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 6px 2px 0;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .step {
-  display: grid;
-  grid-template-columns: 22px 1fr;
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: auto 1fr;
   gap: 6px;
   align-items: center;
-  min-width: 0;
-  min-height: 42px;
-  padding: 7px;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text-tertiary);
+  min-height: 40px;
+  padding: 0 0 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
 }
 
 .step span {
   display: inline-grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #f0f0f0;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 700;
 }
 
 .step strong {
   overflow: hidden;
-  font-size: 0.76rem;
-  font-weight: 650;
+  font-size: 0.84rem;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .step.active {
-  border-color: #ffbb96;
-  background: var(--primary-soft);
   color: var(--primary);
+}
+
+.step.active::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--primary);
+  content: "";
 }
 
 .step.active span {
@@ -173,6 +219,7 @@ h2 {
   display: grid;
   gap: 12px;
   padding: 14px;
+  border-radius: 6px;
 }
 
 .approval-panel {
@@ -189,7 +236,7 @@ h2 {
   grid-template-columns: 1fr auto;
   gap: 10px;
   align-items: start;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--border-light);
 }
 
@@ -235,8 +282,8 @@ h2 {
   min-height: 118px;
   padding: 16px;
   border: 1px dashed #ff9c7b;
-  border-radius: 8px;
-  background: #fff7f3;
+  border-radius: 4px;
+  background: #fff8f6;
   color: var(--text);
   text-align: center;
   cursor: pointer;
@@ -296,7 +343,7 @@ h2 {
   min-height: 78px;
   aspect-ratio: 1;
   border: 1px solid var(--border-light);
-  border-radius: 6px;
+  border-radius: 4px;
   background: #fafafa;
 }
 
@@ -345,7 +392,7 @@ textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
   background: #ffffff;
   color: var(--text);
   font-size: 0.9rem;
@@ -377,7 +424,7 @@ textarea:focus {
   gap: 4px;
   padding: 10px;
   border: 1px solid #ffe58f;
-  border-radius: 6px;
+  border-radius: 4px;
   background: var(--warning-soft);
 }
 
@@ -396,14 +443,12 @@ textarea:focus {
   min-height: 46px;
   padding: 6px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: #ffffff;
   color: var(--text);
   font-size: 0.98rem;
   font-weight: 700;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.02);
+  box-shadow: none;
   cursor: pointer;
 }
 
@@ -432,7 +477,7 @@ textarea:focus {
 .status {
   min-height: 52px;
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: 6px;
   color: #5b5b5b;
   font-size: 0.94rem;
   line-height: 1.45;
