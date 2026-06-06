@@ -19,6 +19,7 @@ const state = {
   viewerUrl: "",
   queuedProductCreation: [],
   productCreationFilled: false,
+  productCreationInFlight: false,
   productEvents: [],
   realtimeAgentConnected: false,
   realtimeToolCalls: [],
@@ -645,10 +646,10 @@ function renderReviewPlan() {
     ? `${state.reviewPlan.status} - ${items.length} products`
     : "No review plan loaded.";
   const canApproveAll = Boolean(state.reviewPlan && (pendingItems.length > 0 || approvedCommands.length > 0));
-  $("#approve-all-sticky").disabled = !canApproveAll;
+  $("#approve-all-sticky").disabled = !canApproveAll || state.productCreationInFlight;
   $("#approve-all-sticky").textContent = pendingItems.length > 0
     ? "Approve all and create products"
-    : "Retry creating approved products";
+    : state.productCreationInFlight ? "Creating product..." : "Retry creating approved products";
   $("#approve-all-sticky-bar").toggleAttribute("hidden", !canApproveAll);
   updateLaunchChecklist();
   const root = $("#review-items");
@@ -1821,6 +1822,10 @@ async function sendLowRiskReplyThroughShopeeTab() {
 }
 
 async function queueShopeeProductCreation(options = {}) {
+  if (state.productCreationInFlight && options.internalQueue !== true) {
+    appendProductEvent("Shopee creation already running", "Wait for the current product creation attempt to finish.", "warning");
+    return;
+  }
   const approvedCommands = state.createProductCommands.filter((command) =>
     command.kind === "create_product" &&
     (command.approvalStatus === "approved" || command.approvalStatus === "edited")
@@ -1832,51 +1837,60 @@ async function queueShopeeProductCreation(options = {}) {
   }
   const command = approvedCommands[0];
   appendProductEvent("Shopee fill started", command.payload?.product?.title || command.productId);
-  state.queuedProductCreation = [{
-    commandId: command.commandId,
-    productId: command.productId,
-    approvalStatus: command.approvalStatus,
-    queuedAt: new Date().toISOString()
-  }];
-  state.productCreationFilled = false;
-  if (globalThis.chrome?.runtime?.sendMessage) {
-    const response = await chrome.runtime.sendMessage({
-      type: "liveseller:queue-create-products",
-      commands: [command]
-    });
-    state.productCreationFilled = Boolean(response?.ok);
-    renderCommands();
-    appendProductEvent(
-      response?.ok ? "Shopee form filled" : "Shopee fill failed",
-      response?.ok
-        ? `${response.evidence?.filled?.join(", ") || "fields"}; images ${response.evidence?.uploadedImages?.count || 0}`
-        : response?.error || response?.evidence?.error || response?.status || "Shopee did not accept the fill.",
-      response?.ok ? "success" : "error"
-    );
+  state.productCreationInFlight = true;
+  renderReviewPlan();
+  try {
+    state.queuedProductCreation = [{
+      commandId: command.commandId,
+      productId: command.productId,
+      approvalStatus: command.approvalStatus,
+      queuedAt: new Date().toISOString()
+    }];
+    state.productCreationFilled = false;
+    if (globalThis.chrome?.runtime?.sendMessage) {
+      const response = await chrome.runtime.sendMessage({
+        type: "liveseller:queue-create-products",
+        commands: [command]
+      });
+      state.productCreationFilled = Boolean(response?.ok);
+      renderCommands();
+      appendProductEvent(
+        response?.ok ? "Shopee form filled" : "Shopee fill failed",
+        response?.ok
+          ? `${response.evidence?.filled?.join(", ") || "fields"}; images ${response.evidence?.uploadedImages?.count || 0}`
+          : response?.error || response?.evidence?.error || response?.status || "Shopee did not accept the fill.",
+        response?.ok ? "success" : "error"
+      );
+      writeLog("#product-creation-log", {
+        status: response?.ok ? "filled_authenticated_shopee_product_form" : "queue_recorded_side_panel_only",
+        commands: state.queuedProductCreation,
+        remainingApprovedCommands: Math.max(approvedCommands.length - 1, 0),
+        result: response
+      });
+      if (response?.ok && options.autoSubmit) {
+        await confirmShopeeProductPublish({
+          continueQueue: options.continueQueue === true,
+          prepareLive: options.prepareLive === true
+        });
+      }
+      void refreshSellerTimeline().catch(() => undefined);
+      return;
+    }
     writeLog("#product-creation-log", {
-      status: response?.ok ? "filled_authenticated_shopee_product_form" : "queue_recorded_side_panel_only",
+      status: "queue_recorded_side_panel_only",
       commands: state.queuedProductCreation,
       remainingApprovedCommands: Math.max(approvedCommands.length - 1, 0),
-      result: response
+      note: "Chrome extension runtime is required to execute inside an authenticated Shopee seller tab."
     });
-    if (response?.ok && options.autoSubmit) {
-      await confirmShopeeProductPublish({
-        continueQueue: options.continueQueue === true,
-        prepareLive: options.prepareLive === true
-      });
-    }
+    appendProductEvent("Shopee fill queued locally", "Chrome extension runtime is required to execute in the seller tab.", "error");
+    renderCommands();
     void refreshSellerTimeline().catch(() => undefined);
-    return;
+  } finally {
+    if (options.internalQueue !== true) {
+      state.productCreationInFlight = false;
+      renderReviewPlan();
+    }
   }
-  writeLog("#product-creation-log", {
-    status: "queue_recorded_side_panel_only",
-    commands: state.queuedProductCreation,
-    remainingApprovedCommands: Math.max(approvedCommands.length - 1, 0),
-    note: "Chrome extension runtime is required to execute inside an authenticated Shopee seller tab."
-  });
-  appendProductEvent("Shopee fill queued locally", "Chrome extension runtime is required to execute in the seller tab.", "error");
-  renderCommands();
-  void refreshSellerTimeline().catch(() => undefined);
 }
 
 async function confirmShopeeProductPublish(options = {}) {
@@ -1924,7 +1938,7 @@ async function confirmShopeeProductPublish(options = {}) {
     response?.ok ? "success" : "error"
   );
   if (response?.ok && options.continueQueue && state.createProductCommands.length > 0) {
-    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: options.prepareLive === true });
+    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: options.prepareLive === true, internalQueue: true });
   } else if (response?.ok && options.prepareLive) {
     appendProductEvent("Shopee publish queue complete", "Registering approved products for livestream context.", "success");
     try {

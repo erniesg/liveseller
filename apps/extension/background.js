@@ -59,15 +59,42 @@ async function findOrCreateShopeeLiveTab() {
   return chrome.tabs.create({ url: SHOPEE_LIVE_SETUP_URL, active: true });
 }
 
-async function findOrCreateShopeeProductTab() {
-  const tabs = await chrome.tabs.query({ url: "https://seller.shopee.sg/portal/product/*" });
-  const existing = tabs.find((tab) => tab.url?.includes("/portal/product/new")) || tabs[0];
+async function findOrCreateShopeeProductTab(options = {}) {
+  const resetToNewProduct = options.resetToNewProduct !== false;
+  const stored = await chrome.storage.session.get("liveseller:productCreationTabId");
+  if (stored["liveseller:productCreationTabId"]) {
+    try {
+      const tab = await chrome.tabs.get(stored["liveseller:productCreationTabId"]);
+      if (tab?.id) {
+        if (resetToNewProduct) {
+          await chrome.tabs.update(tab.id, { url: SHOPEE_CREATE_PRODUCT_URL, active: true });
+          await waitForTabLoad(tab.id);
+          return { ...tab, url: SHOPEE_CREATE_PRODUCT_URL };
+        }
+        await chrome.tabs.update(tab.id, { active: true });
+        return tab;
+      }
+    } catch {
+      await chrome.storage.session.remove("liveseller:productCreationTabId");
+    }
+  }
+
+  const newTabs = await chrome.tabs.query({ url: "https://seller.shopee.sg/portal/product/new*" });
+  const sellerTabs = await chrome.tabs.query({ url: "https://seller.shopee.sg/*" });
+  const existing = newTabs[0] || sellerTabs.find((tab) => tab.active) || sellerTabs[0];
   if (existing?.id) {
+    await chrome.storage.session.set({ "liveseller:productCreationTabId": existing.id });
+    if (resetToNewProduct) {
+      await chrome.tabs.update(existing.id, { url: SHOPEE_CREATE_PRODUCT_URL, active: true });
+      await waitForTabLoad(existing.id);
+      return { ...existing, url: SHOPEE_CREATE_PRODUCT_URL };
+    }
     await chrome.tabs.update(existing.id, { active: true });
     return existing;
   }
   const tab = await chrome.tabs.create({ url: SHOPEE_CREATE_PRODUCT_URL, active: true });
   if (tab.id) {
+    await chrome.storage.session.set({ "liveseller:productCreationTabId": tab.id });
     await waitForTabLoad(tab.id);
   }
   return tab;
@@ -432,7 +459,7 @@ async function fillShopeeProductDraft(tab, command, options = {}) {
   let [result] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: fillShopeeCreateProductForm,
-    args: [command, { submit: false }]
+    args: [command, { submit: false, skipImages: options.submit === true }]
   });
   steps.push({ step: "basic", result: result?.result });
 
@@ -549,7 +576,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, status: "no_approved_create_product_commands", commandCount: 0 });
       return false;
     }
-    findOrCreateShopeeProductTab()
+    findOrCreateShopeeProductTab({ resetToNewProduct: true })
       .then((tab) => fillShopeeProductDraft(tab, commands[0], { submit: false }))
       .then((result) => sendResponse({
         ok: Boolean(result?.ok),
@@ -572,7 +599,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, status: "no_approved_create_product_commands", commandCount: 0 });
       return false;
     }
-    findOrCreateShopeeProductTab()
+    findOrCreateShopeeProductTab({ resetToNewProduct: false })
       .then((tab) => fillShopeeProductDraft(tab, commands[0], { submit: true }))
       .then((result) => sendResponse({
         ok: Boolean(result?.ok && result?.submitted),

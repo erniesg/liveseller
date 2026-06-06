@@ -518,6 +518,8 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("Retry creating approved products");
     expect(sidePanelScript).toContain("Shopee creation retry started");
     expect(sidePanelScript).toContain("Create command rebuild started");
+    expect(sidePanelScript).toContain("productCreationInFlight");
+    expect(sidePanelScript).toContain("Shopee creation already running");
     expect(sidePanel).not.toContain('id="approve-all"');
     expect(sidePanel).toContain("More options");
     expect(sidePanel).toContain("Load cached plan");
@@ -631,6 +633,9 @@ describe("Shopee extension command safety", () => {
     expect(background).toContain("liveseller:confirm-product-publish");
     expect(background).toContain("fillShopeeProductDraft");
     expect(background).toContain("clickShopeeProductSection");
+    expect(background).toContain("productCreationTabId");
+    expect(background).toContain("resetToNewProduct: true");
+    expect(background).toContain("resetToNewProduct: false");
     expect(background).toContain("skipImages: true");
     expect(background).toContain("already_uploaded_before_submit");
     expect(background).toContain("shipping_submit");
