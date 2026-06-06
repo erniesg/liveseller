@@ -187,5 +187,6 @@ describe("live brain policy runtime", () => {
         expect.objectContaining({ intent: "request_edit" })
       ])
     });
+    expect(buildShopeeCreateProductCommands(updatedPlan)).toEqual([]);
   });
 });

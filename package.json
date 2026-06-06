@@ -15,7 +15,9 @@
     "dev:overlay": "npm --workspace @liveseller/overlay run dev",
     "dev:runtime": "npm --workspace @liveseller/runtime run dev",
     "demo:prep": "npm --workspace @liveseller/prep run demo",
-    "demo:runtime": "npm --workspace @liveseller/runtime run demo"
+    "demo:runtime": "npm --workspace @liveseller/runtime run demo",
+    "live:prep:one-image": "tsx scripts/liveOneImageReviewSmoke.ts",
+    "live:prep:one-image:raw": "npm --workspace @liveseller/prep run live:one-image"
   },
   "dependencies": {
     "zod": "^3.25.76"

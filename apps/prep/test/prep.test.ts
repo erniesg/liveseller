@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -24,6 +24,7 @@ import {
   readSeedDocuments
 } from "../src/index";
 import { buildPrepDemoPayload } from "../src/demo";
+import { loadEnvFile, runOneImageLivePrep } from "../src/liveOpenAiPrep";
 
 const sellerDropFileNames = [
   "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰.jpg",
@@ -404,6 +405,70 @@ describe("prep catalog brain", () => {
       expect.objectContaining({ status: "completed" }),
       expect.objectContaining({ status: "completed" })
     ]);
+  });
+
+  it("runs a one-image live prep smoke flow with a fake OpenAI image edit", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "liveseller-live-one-image-"));
+    const outputDir = join(folder, "out");
+    const sourceImagePath = join(folder, "custom-strap.jpg");
+    writeFileSync(sourceImagePath, "fixture image bytes");
+    const product = customDropProduct(["custom-strap.jpg"]);
+    const fakePng = Buffer.from("generated png bytes").toString("base64");
+    const fetchImpl = vi.fn(async () => new Response(
+      JSON.stringify({
+        created: 1770000000,
+        data: [{ b64_json: fakePng }]
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }
+    ));
+
+    const result = await runOneImageLivePrep({
+      apiKey: "test-openai-key",
+      sourceImagePath,
+      outputDir,
+      products: [product],
+      liveSessionSpec: {
+        ...vintageJewelryLiveSessionSpec,
+        sessionId: "live-one-image-openai-001",
+        products: [product]
+      },
+      fetchImpl
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/images/edits",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(result.initialReviewPlan.items[0]?.product.media.images).toHaveLength(1);
+    expect(result.updatedReviewPlan.generationTasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskType: "image_edit",
+          status: "completed",
+          outputRefs: [expect.stringContaining("generated/")]
+        })
+      ])
+    );
+    expect(result.generatedImagePaths).toHaveLength(1);
+    expect(existsSync(result.generatedImagePaths[0]!)).toBe(true);
+    expect(readFileSync(result.generatedImagePaths[0]!, "utf8")).toBe("generated png bytes");
+  });
+
+  it("loads env files by walking up from a workspace directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "liveseller-env-root-"));
+    const nested = join(root, "apps", "prep");
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(root, ".env"), "LIVESELLER_TEST_ENV=value-from-root\n");
+    delete process.env.LIVESELLER_TEST_ENV;
+
+    const loadedKeys = loadEnvFile(nested);
+
+    expect(loadedKeys).toEqual(["LIVESELLER_TEST_ENV"]);
+    expect(process.env.LIVESELLER_TEST_ENV).toBe("value-from-root");
+    delete process.env.LIVESELLER_TEST_ENV;
   });
 
   it("surfaces actual seller fixtures in the prep demo instead of seed products", () => {
