@@ -625,11 +625,16 @@ async function registerApprovedLiveSession() {
 
 function renderReviewPlan() {
   const items = currentItems();
+  const pendingItems = items.filter((item) =>
+    item.decision.status !== "approved" && item.decision.status !== "edited" && item.decision.status !== "rejected"
+  );
   $("#liveseller-prep-review").toggleAttribute("hidden", items.length === 0);
   $("#review-status").textContent = state.reviewPlan
     ? `${state.reviewPlan.status} - ${items.length} products`
     : "No review plan loaded.";
-  $("#approve-all").disabled = !state.reviewPlan;
+  const canApproveAll = Boolean(state.reviewPlan && pendingItems.length > 0);
+  $("#approve-all-sticky").disabled = !canApproveAll;
+  $("#approve-all-sticky-bar").toggleAttribute("hidden", !canApproveAll);
   updateLaunchChecklist();
   const root = $("#review-items");
   root.replaceChildren();
@@ -653,15 +658,11 @@ function renderReviewPlan() {
       <label>Request changes <textarea data-field="seller-request" rows="2" placeholder="Example: make the title shorter or suggest a cleaner cover image"></textarea></label>
       <div class="button-row">
         <button data-action="request-changes" type="button">Request changes</button>
-        <button data-action="approve" type="button">Approve and create product</button>
         <button data-action="reject" type="button">Reject</button>
       </div>
     `;
     card.querySelector("[data-action='request-changes']").addEventListener("click", () =>
       void requestPlanChanges(card, item).catch((error) => writeLog("#operator-result-log", error.message))
-    );
-    card.querySelector("[data-action='approve']").addEventListener("click", () =>
-      void submitDecision(card, item, "approved")
     );
     card.querySelector("[data-action='reject']").addEventListener("click", () =>
       void submitDecision(card, item, "rejected")
@@ -2051,10 +2052,13 @@ async function operatorBuildCreateProducts() {
 
 $("#load-review-plan").addEventListener("click", () => void loadReviewPlan().catch((error) => writeLog("#review-status", error.message)));
 $("#toggle-settings").addEventListener("click", toggleSettingsPanel);
-$("#approve-all").addEventListener("click", () => void approveAll().catch((error) => {
-  appendProductEvent("Approve all failed", error instanceof Error ? error.message : String(error), "error");
-  writeLog("#command-log", error instanceof Error ? error.message : String(error));
-}));
+function handleApproveAllClick() {
+  void approveAll().catch((error) => {
+    appendProductEvent("Approve all failed", error instanceof Error ? error.message : String(error), "error");
+    writeLog("#command-log", error instanceof Error ? error.message : String(error));
+  });
+}
+$("#approve-all-sticky").addEventListener("click", handleApproveAllClick);
 $("#intake-file-input").addEventListener("change", (event) => addIntakeFiles(event.target.files || []));
 $("#intake-dropzone").addEventListener("dragover", (event) => {
   event.preventDefault();

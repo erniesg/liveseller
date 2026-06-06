@@ -374,6 +374,19 @@ details.diagnostics[open] {
   border-color: #f59e0b;
 }
 
+.sticky-action-bar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 26%);
+  bottom: 0;
+  margin: 0 -12px -12px;
+  padding: 18px 12px 12px;
+  position: sticky;
+  z-index: 1;
+}
+
+.sticky-action-bar button {
+  width: 100%;
+}
+
 .tag {
   border-radius: 999px;
   background: #ffedd5;
