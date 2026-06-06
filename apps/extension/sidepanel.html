@@ -29,9 +29,19 @@
           Livestream session
           <input id="live-session-id" value="live-seed-001" />
         </label>
+        <label>
+          Shopee Live setup URL
+          <input id="shopee-live-url" value="https://live.shopee.sg/pc/setup?from=seller_center" />
+        </label>
+        <label>
+          Public overlay browser-source URL
+          <input id="public-overlay-url" readonly />
+        </label>
         <div class="button-row">
           <button id="load-review-plan" type="button">Load review plan</button>
           <button id="open-public-overlay" type="button">Open public overlay</button>
+          <button id="copy-public-overlay" type="button">Copy overlay URL</button>
+          <button id="open-shopee-live" type="button">Open Shopee Live setup</button>
         </div>
       </section>
 
@@ -69,6 +79,13 @@
           <button id="go-live" type="button" disabled>Go Live in Shopee Seller Centre</button>
           <span class="warning">Manual high-risk Shopee click after explicit approval.</span>
         </div>
+        <ol id="launch-checklist" class="checklist">
+          <li data-check="approved-products">Approve or edit all products.</li>
+          <li data-check="create-products">Execute or dry-run create_product commands.</li>
+          <li data-check="prepare-live">Prepare livestream with redacted credential evidence.</li>
+          <li data-check="overlay-open">Open/copy the public overlay browser-source URL.</li>
+          <li data-check="seller-preview">Verify Shopee camera/video preview and overlay feed manually.</li>
+        </ol>
         <div id="livestream-log" class="log">No livestream setup command yet.</div>
       </section>
 

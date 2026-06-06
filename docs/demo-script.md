@@ -56,6 +56,48 @@ http://127.0.0.1:5180/?mode=seller&runtimeOrigin=http%3A%2F%2F127.0.0.1%3A8787&s
 
 Use this only for seller guidance, viewer-message testing, caption controls, and run-of-show rehearsal. These controls must not appear on the public overlay.
 
+## Chrome Extension Human Test
+
+Run:
+
+```bash
+npm run dev:runtime
+npm run dev:overlay:local
+```
+
+Load the unpacked extension from `apps/extension`, open the side panel, and use `http://127.0.0.1:8787` as the runtime origin.
+
+Validation path:
+
+1. Click `Load review plan`.
+2. Edit one product title, description, category, price, or stock field.
+3. Click `Approve or save edit`, then `Approve all`.
+4. Click `Execute create_product`; this is still dry-run readiness until real Shopee selectors are audited.
+5. Click `Prepare livestream`; expected evidence has `present_redacted` credentials and `goLivePressed:false`.
+6. Click `Copy overlay URL` or `Open public overlay`; use that URL as the public browser source for stream software or a Shopee-supported preview path.
+7. Click `Open Shopee Live setup` to move the human to Seller Centre.
+8. In Shopee, verify camera/video preview and overlay feed manually.
+9. Send a test viewer message from another account/device, then click `Use captured Shopee message` or enter a manual viewer message.
+10. Confirm seller suggestions appear only in the extension side panel and never in the public overlay.
+
+Image edit prep can run in parallel before final approval:
+
+```bash
+npm run live:prep:one-image
+```
+
+Expected timing: under 2 minutes for review/edit/approval on fixtures, 1-3 minutes for a one-image edit smoke, and 3-8 minutes target for a three-product pre-stream prep with parallel image edits after seller materials are ready.
+
+To repeat the Shopee preview ingest smoke without storing secrets, copy the RTMP URL and key from the Shopee preview page into environment variables:
+
+```bash
+SHOPEE_RTMP_URL='<copy Shopee URL field>' \
+SHOPEE_RTMP_KEY='sg-live-...redacted...' \
+npm run live:stream:overlay-smoke
+```
+
+The script captures the public overlay URL and pushes a short preview feed to Shopee. It redacts the URL/key from output. It does not click `Go Live`.
+
 ## 1:45-2:00 Summary
 
 Show post-stream summary recommendations from `apps/runtime/src/postStream.ts` and the explicit real Shopee audit blocker in `docs/shopee-ui-audit.md`.

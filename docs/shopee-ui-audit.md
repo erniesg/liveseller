@@ -7,6 +7,9 @@ This document is the required real-path checkpoint before relying on Shopee sele
 - Status: not yet audited.
 - Blocker label: `REAL_SHOPEE_UI_AUDIT_REQUIRED`.
 - Reason: this repo provides the extension/content-script runtime bridge and deterministic command safety, but no authenticated Shopee seller tab has been inspected yet.
+- Chrome check on 2026-06-06: an authenticated Shopee Seller Centre product-list tab was visible at `https://seller.shopee.sg/portal/product/list/all?operationSortBy=modified_time`.
+- Shopee Live setup proof on 2026-06-06: direct Seller Centre `/portal/live` returned `/404`, but `https://live.shopee.sg/pc/setup?from=seller_center` opened the real `Create Streaming` page. A test stream setup advanced to `https://live.shopee.sg/pc/preview?...`, showing redacted RTMP URL/key presence, `Refresh`, comments, realtime data, and a `Go Live` button. `Go Live` was not pressed.
+- Shopee ingest proof on 2026-06-06: `ffmpeg` pushed a short public-overlay smoke feed to the redacted Shopee RTMP target. The preview page stopped showing the acquisition failure and displayed the incoming LiveSeller overlay background while buffering. Full host-camera compositing remains an OBS/browser-source setup step.
 - Seller-private UI surfaces:
   - Chrome extension side panel: `apps/extension/sidepanel.html`. This is where product review, edit, approval, create-product execution, livestream preparation, and seller-only suggestions belong during a real authenticated Shopee session.
   - Local seller console: `http://127.0.0.1:5180/?mode=seller&runtimeOrigin=http%3A%2F%2F127.0.0.1%3A8787&sessionId=live-vintage-jewelry-001`. This is a local test harness only.
@@ -14,6 +17,8 @@ This document is the required real-path checkpoint before relying on Shopee sele
   - Browser-source overlay: `http://127.0.0.1:5180/?runtimeOrigin=http%3A%2F%2F127.0.0.1%3A8787&sessionId=live-vintage-jewelry-001`. This must not show seller controls, mic controls, review controls, stream credentials, or suggestions.
 - Go Live location:
   - Real Go Live is still the Shopee Seller Centre control in the authenticated seller tab. LiveSeller may prepare the session and capture redacted credential presence evidence, but it must not press Go Live until explicit seller approval and camera preview verification.
+- Stream output target:
+  - The extension side panel now exposes the public overlay browser-source URL. A human should paste this URL into OBS/streaming software or the Shopee-supported browser-source/scene input, then verify the viewer-facing feed shows host video plus overlay. If Shopee only accepts camera/RTMP input, the stream pipe remains the seller's streaming software: LiveSeller provides the overlay URL and runtime events, not raw stream credentials.
 
 ## Required Evidence
 
@@ -38,9 +43,9 @@ Record these before enabling real sends:
 | Escalate risky message | Implemented as seller-only command | Blocked pending audit | No public auto-send |
 | Read active product | Contracted | Blocked pending audit | Needs seller UI selector |
 | Show overlay promo | Implemented in overlay app | Mock only | Must distinguish Shopee-backed vs overlay-only |
-| Prepare livestream | Implemented as dry-run command | Blocked pending audit | `goLive:false`, redacted credential presence only |
+| Prepare livestream | Implemented as dry-run command | Test setup and RTMP ingest proven | `goLive:false`, redacted credential presence only |
 | Press Go Live | Not automated | Blocked pending explicit approval | Manual Shopee Seller Centre click after camera preview |
-| Seller suggestions | Implemented in local seller console | Blocked pending audit | Must remain side panel/seller console only, never public overlay |
+| Seller suggestions | Implemented in extension side panel and local seller console | Blocked pending live chat selector audit | Must remain side panel/seller console only, never public overlay |
 | Realtime voice translation | Server-owned endpoint scaffolded | Blocked without server `OPENAI_API_KEY` and seller mic approval | Browser receives ephemeral client secret only |
 
 ## Local Dynamic Payload Proof
@@ -56,12 +61,22 @@ Record these before enabling real sends:
 
 1. Start the runtime server with `npm run dev:runtime`.
 2. Start the fixed local overlay server with `npm run dev:overlay:local`.
-3. Load the unpacked extension from `apps/extension` after building extension assets.
+3. Load the unpacked extension from `apps/extension`.
 4. Open an authenticated Shopee seller live tab.
-5. Send a viewer message from a second device/account.
-6. Record the captured viewer ID, name, text, timestamp, and DOM selector.
-7. Trigger a safe price question and verify draft/send behavior.
-8. Trigger a refund/fake/legal/discount message and verify no public auto-send occurs.
-9. Run prepare-livestream only with `goLive:false`; record redacted presence evidence for server URL and stream key.
-10. Verify the public overlay URL has no seller controls, while the extension side panel or local seller console shows seller suggestions.
-11. Press Go Live manually in Shopee Seller Centre only after explicit seller approval and camera preview verification.
+5. In the extension side panel, load the review plan, edit at least one product field, approve all products, execute `create_product`, and run prepare-livestream only with `goLive:false`.
+6. Copy the public overlay browser-source URL from the side panel and add it to the stream software or Shopee-supported preview path.
+7. Record redacted presence evidence for server URL and stream key; never store raw stream secrets in the extension or overlay.
+8. Send a viewer message from a second device/account.
+9. Record the captured viewer ID, name, text, timestamp, and DOM selector.
+10. Trigger a safe price question and verify draft/send behavior.
+11. Trigger a refund/fake/legal/discount message and verify no public auto-send occurs.
+12. Verify the public overlay URL has no seller controls, while the extension side panel or local seller console shows seller suggestions.
+13. Verify the Shopee camera/video preview and overlay feed manually.
+14. Press Go Live manually in Shopee Seller Centre only after explicit seller approval and camera preview verification.
+
+## Prep Timing Expectations
+
+- Review/edit/approve fixture plan in the Chrome side panel: under 2 minutes.
+- One server-side image edit smoke with `npm run live:prep:one-image`: typically 1-3 minutes depending on image model latency and network.
+- Three-product pre-stream plan finalisation with parallel image edits: target 3-8 minutes after seller materials are available.
+- Real Shopee livestream creation: depends on Seller Centre page latency, camera permission, and stream software setup; treat as blocked until the Live UI audit records selectors and screenshots.

@@ -5,7 +5,10 @@ const state = {
   createProductCommands: [],
   startLivestreamCommands: [],
   latestActions: [],
-  capturedMessage: undefined
+  capturedMessage: undefined,
+  createProductExecuted: false,
+  livestreamPrepared: false,
+  overlayOpened: false
 };
 
 function runtimeOrigin() {
@@ -18,6 +21,10 @@ function reviewSessionId() {
 
 function liveSessionId() {
   return $("#live-session-id").value.trim() || reviewSessionId();
+}
+
+function publicOverlayUrl() {
+  return `http://127.0.0.1:5180/?runtimeOrigin=${encodeURIComponent(runtimeOrigin())}&sessionId=${encodeURIComponent(liveSessionId())}`;
 }
 
 function setConnection(label, kind = "") {
@@ -64,6 +71,31 @@ async function checkRuntime() {
 
 function currentItems() {
   return state.reviewPlan?.items || [];
+}
+
+function allProductsApproved() {
+  return currentItems().length > 0 && currentItems().every((item) =>
+    item.decision.status === "approved" || item.decision.status === "edited"
+  );
+}
+
+function updateLaunchChecklist() {
+  const checks = {
+    "approved-products": allProductsApproved(),
+    "create-products": state.createProductExecuted,
+    "prepare-live": state.livestreamPrepared,
+    "overlay-open": state.overlayOpened,
+    "seller-preview": false
+  };
+  for (const [name, complete] of Object.entries(checks)) {
+    const node = document.querySelector(`[data-check="${name}"]`);
+    if (!node) {
+      continue;
+    }
+    node.classList.toggle("complete", complete);
+    node.setAttribute("aria-checked", String(complete));
+  }
+  $("#public-overlay-url").value = publicOverlayUrl();
 }
 
 function productFromCard(card, item) {
@@ -128,6 +160,7 @@ function renderReviewPlan() {
     ? `${state.reviewPlan.status} - ${items.length} products`
     : "No review plan loaded.";
   $("#approve-all").disabled = !state.reviewPlan;
+  updateLaunchChecklist();
   const root = $("#review-items");
   root.replaceChildren();
 
@@ -165,6 +198,7 @@ function renderReviewPlan() {
 function renderCommands() {
   $("#execute-create-products").disabled = state.createProductCommands.length === 0;
   $("#prepare-livestream").disabled = state.startLivestreamCommands.length === 0;
+  updateLaunchChecklist();
   writeLog("#command-log", {
     createProductCommands: state.createProductCommands.map((command) => ({
       commandId: command.commandId,
@@ -189,6 +223,8 @@ async function loadReviewPlan() {
   state.reviewPlan = await fetchJson(`/api/prep/review-plan/${encodeURIComponent(reviewSessionId())}`);
   state.createProductCommands = [];
   state.startLivestreamCommands = [];
+  state.createProductExecuted = false;
+  state.livestreamPrepared = false;
   renderReviewPlan();
   renderCommands();
 }
@@ -320,7 +356,25 @@ async function requestRealtimeSession() {
 }
 
 function openPublicOverlay() {
-  const url = `http://127.0.0.1:5180/?runtimeOrigin=${encodeURIComponent(runtimeOrigin())}&sessionId=${encodeURIComponent(liveSessionId())}`;
+  const url = publicOverlayUrl();
+  state.overlayOpened = true;
+  updateLaunchChecklist();
+  if (globalThis.chrome?.tabs) {
+    chrome.tabs.create({ url });
+  } else {
+    window.open(url, "_blank", "noopener");
+  }
+}
+
+async function copyPublicOverlayUrl() {
+  $("#public-overlay-url").value = publicOverlayUrl();
+  state.overlayOpened = true;
+  updateLaunchChecklist();
+  await navigator.clipboard?.writeText(publicOverlayUrl());
+}
+
+function openShopeeLiveSetup() {
+  const url = $("#shopee-live-url").value.trim() || "https://live.shopee.sg/pc/setup?from=seller_center";
   if (globalThis.chrome?.tabs) {
     chrome.tabs.create({ url });
   } else {
@@ -329,6 +383,8 @@ function openPublicOverlay() {
 }
 
 function executeCreateProducts() {
+  state.createProductExecuted = state.createProductCommands.length > 0;
+  updateLaunchChecklist();
   writeLog("#command-log", {
     status: "ready_for_authenticated_tab_execution",
     commands: state.createProductCommands.map((command) => command.commandId),
@@ -337,6 +393,8 @@ function executeCreateProducts() {
 }
 
 function prepareLivestream() {
+  state.livestreamPrepared = state.startLivestreamCommands.length > 0;
+  updateLaunchChecklist();
   writeLog("#livestream-log", {
     status: "prepared_dry_run",
     evidence: state.startLivestreamCommands.map((command) => ({
@@ -393,6 +451,8 @@ $("#approve-all").addEventListener("click", () => void approveAll().catch((error
 $("#execute-create-products").addEventListener("click", executeCreateProducts);
 $("#prepare-livestream").addEventListener("click", prepareLivestream);
 $("#open-public-overlay").addEventListener("click", openPublicOverlay);
+$("#copy-public-overlay").addEventListener("click", () => void copyPublicOverlayUrl().catch((error) => writeLog("#livestream-log", error.message)));
+$("#open-shopee-live").addEventListener("click", openShopeeLiveSetup);
 $("#send-viewer-message").addEventListener("click", () => void sendViewerMessage().catch((error) => writeLog("#suggestion-log", error.message)));
 $("#send-host-caption").addEventListener("click", () => void sendHostCaption().catch((error) => writeLog("#realtime-log", error.message)));
 $("#request-realtime-session").addEventListener("click", () => void requestRealtimeSession());
@@ -400,3 +460,4 @@ $("#use-captured-message").addEventListener("click", () => void useCapturedMessa
 $("#render-codex-events").addEventListener("click", renderCodexEvents);
 
 void checkRuntime().catch(() => undefined);
+updateLaunchChecklist();
