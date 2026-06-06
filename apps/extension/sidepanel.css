@@ -159,6 +159,64 @@ label {
   padding: 3px 7px;
 }
 
+.dropzone {
+  align-items: center;
+  border: 1px dashed #f97316;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  min-height: 108px;
+  padding: 14px;
+  text-align: center;
+}
+
+.dropzone.active {
+  background: #ffedd5;
+  border-color: #ea580c;
+}
+
+.dropzone input {
+  display: none;
+}
+
+.preview-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.preview-item {
+  aspect-ratio: 1;
+  border: 1px solid #d8e0ec;
+  border-radius: 7px;
+  overflow: hidden;
+  position: relative;
+}
+
+.preview-item img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.preview-item button {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.82);
+  border-radius: 999px;
+  display: grid;
+  height: 24px;
+  justify-items: center;
+  padding: 0;
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  width: 24px;
+}
+
 .checklist {
   border: 1px solid #e2e8f0;
   border-radius: 6px;

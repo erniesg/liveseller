@@ -70,16 +70,19 @@ Load the unpacked extension from `apps/extension`, open the side panel, and use 
 Validation path:
 
 1. Click `Load review plan`.
-2. Edit one product title, description, category, price, or stock field.
-3. Click `Approve or save edit`, then `Approve all`.
-4. Click `Execute create_product`; this is still dry-run readiness until real Shopee selectors are audited.
-5. Click `Prepare livestream`; expected evidence has `present_redacted` credentials and `goLivePressed:false`.
-6. Click `Copy overlay URL` or `Open public overlay`; this is the viewer-safe browser source.
-7. Click `AI prepare Shopee Test preview`; the extension opens the authenticated Shopee Live setup, advances to Test preview, and captures RTMP credential presence without pressing `Go Live`.
-8. Click `Start overlay preview pipe`; the extension sends the transient RTMP URL/key to the local runtime, which runs the overlay stream smoke and returns only redacted evidence.
-9. In Shopee, verify camera/video preview and overlay feed manually.
-10. Send a test viewer message from another account/device, then click `Use captured Shopee message` or enter a manual viewer message.
-11. Confirm seller suggestions appear only in the extension side panel and never in the public overlay.
+2. Or drop product images into `Seller material intake`, review the generated editable draft, and click `Create review draft`.
+3. Edit one product title, description, category, price, or stock field.
+4. Click `Approve or save edit`, then `Approve all`.
+5. Click `Execute create_product`; side-panel image drafts are local review proof until server-backed ingestion is connected, while runtime fixture plans return dry-run create-product commands.
+6. Click `Prepare livestream`; expected evidence has `present_redacted` credentials and `goLivePressed:false`.
+7. Click `Copy overlay URL` or `Open public overlay`; this is the viewer-safe browser source.
+8. Click `AI prepare Shopee Test preview`; the extension opens the authenticated Shopee Live setup, advances to Test preview, and captures RTMP credential presence without pressing `Go Live`.
+9. Click `Start overlay preview pipe`; the extension sends the transient RTMP URL/key to the local runtime, which runs the overlay stream smoke and returns only redacted evidence.
+10. In Shopee, verify camera/video preview and overlay feed manually.
+11. Send a test viewer message from another account/device, then click `Use captured Shopee message` or enter a manual viewer message.
+12. Confirm seller suggestions appear only in the extension side panel and never in the public overlay.
+
+Camera plus overlay streaming requires a local native video bridge such as OBS, a virtual camera, or runtime-owned `ffmpeg` camera capture. The Chrome extension can coordinate the authenticated Shopee page and pass transient RTMP credentials to the local runtime, but browser extension pages cannot directly spawn a long-running RTMP encoder.
 
 Image edit prep can run in parallel before final approval:
 

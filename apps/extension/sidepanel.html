@@ -45,6 +45,34 @@
         </div>
       </section>
 
+      <section id="liveseller-material-intake" class="panel" aria-label="Seller material intake">
+        <div class="section-heading">
+          <div>
+            <h2>Seller material intake</h2>
+            <p>Drop product images to create an editable review draft before publish approval.</p>
+          </div>
+          <span id="intake-image-count" class="tag">No images</span>
+        </div>
+        <label id="intake-dropzone" class="dropzone" for="intake-file-input">
+          <input id="intake-file-input" type="file" accept="image/*" multiple />
+          <strong>Drag product images here</strong>
+          <span>or click to choose files</span>
+        </label>
+        <div id="intake-preview-grid" class="preview-grid" aria-label="Selected product images"></div>
+        <div class="product-grid">
+          <label>Product name <input id="intake-product-name" /></label>
+          <label>Category <input id="intake-category" value="Fashion Accessories" /></label>
+          <label>Suggested price <input id="intake-price" value="19.90" /></label>
+          <label>Stock <input id="intake-stock" type="number" value="20" /></label>
+        </div>
+        <label>Description <textarea id="intake-description" rows="3"></textarea></label>
+        <div class="button-row">
+          <button id="create-intake-review" type="button" disabled>Create review draft</button>
+          <button id="clear-intake" type="button">Clear</button>
+        </div>
+        <div id="intake-log" class="log">Drop images to begin.</div>
+      </section>
+
       <section id="liveseller-prep-review" class="panel" aria-label="Seller material review" aria-live="polite">
         <div class="section-heading">
           <div>

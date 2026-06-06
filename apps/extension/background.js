@@ -1,4 +1,5 @@
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true });
   chrome.storage.session.set({
     "liveseller:runtimeOrigin": "http://127.0.0.1:8787"
   });

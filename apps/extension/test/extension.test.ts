@@ -401,6 +401,8 @@ describe("Shopee extension command safety", () => {
   it("keeps OpenAI keys out of extension manifest", () => {
     const manifest = readFileSync(join(repoRoot, "apps/extension/manifest.json"), "utf8");
     expect(manifest).not.toMatch(/OPENAI|sk-/i);
+    expect(manifest).toContain('"sidePanel"');
+    expect(manifest).toContain('"action"');
     expect(manifest).toContain('"service_worker": "background.js"');
     expect(manifest).toContain('"contentScript.js"');
   });
@@ -413,6 +415,9 @@ describe("Shopee extension command safety", () => {
 
     expect(sidePanel).toContain('id="liveseller-codex-operator"');
     expect(sidePanel).toContain("Codex operator");
+    expect(sidePanel).toContain('id="liveseller-material-intake"');
+    expect(sidePanel).toContain("Drag product images here");
+    expect(sidePanel).toContain("Create review draft");
     expect(sidePanel).toContain('id="liveseller-live-control"');
     expect(sidePanel).toContain("Prepare livestream");
     expect(sidePanel).toContain("Go Live in Shopee Seller Centre");
@@ -426,6 +431,8 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Verify Shopee camera/video preview and overlay feed manually.");
     expect(sidePanel).toContain('script src="sidepanel.js"');
     expect(sidePanelScript).toContain("/api/prep/review-plan/");
+    expect(sidePanelScript).toContain("createIntakeReviewDraft");
+    expect(sidePanelScript).toContain("extension_side_panel_drag_drop");
     expect(sidePanelScript).toContain("/api/prep/review-decisions");
     expect(sidePanelScript).toContain("/api/runtime/events");
     expect(sidePanelScript).toContain("/api/runtime/realtime/session");
@@ -436,6 +443,7 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("updateLaunchChecklist");
     expect(sidePanelScript).toContain("present_redacted");
     expect(background).toContain("liveseller:lastViewerMessage");
+    expect(background).toContain("openPanelOnActionClick");
     expect(background).toContain("prepareShopeeTestPreview");
     expect(background).toContain("liveseller:prepare-shopee-test-preview");
     expect(contentScript).toContain("data-viewer-id");

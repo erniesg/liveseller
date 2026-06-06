@@ -4,6 +4,7 @@ const state = {
   reviewPlan: undefined,
   createProductCommands: [],
   startLivestreamCommands: [],
+  intakeReviewItems: [],
   latestActions: [],
   capturedMessage: undefined,
   createProductExecuted: false,
@@ -12,6 +13,8 @@ const state = {
   shopeePreview: undefined,
   overlayPipeStarted: false
 };
+
+let intakeImages = [];
 
 function runtimeOrigin() {
   return $("#runtime-origin").value.trim().replace(/\/$/u, "") || "http://127.0.0.1:8787";
@@ -49,6 +52,25 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function titleCase(value) {
+  return value
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function inferProductName(fileName) {
+  const cleanName = fileName
+    .replace(/\.[^.]+$/u, "")
+    .replaceAll(/[_-]+/gu, " ")
+    .replace(/\b(img|image|photo|product|shopee|upload)\b/giu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return cleanName ? titleCase(cleanName) : "New Product";
+}
+
 async function fetchJson(path, options = {}) {
   const response = await fetch(`${runtimeOrigin()}${path}`, {
     headers: { "content-type": "application/json", ...(options.headers || {}) },
@@ -72,7 +94,7 @@ async function checkRuntime() {
 }
 
 function currentItems() {
-  return state.reviewPlan?.items || [];
+  return [...state.intakeReviewItems, ...(state.reviewPlan?.items || [])];
 }
 
 function allProductsApproved() {
@@ -197,6 +219,132 @@ function renderReviewPlan() {
   }
 }
 
+function renderIntake() {
+  $("#intake-image-count").textContent = intakeImages.length === 0
+    ? "No images"
+    : `${intakeImages.length} image${intakeImages.length === 1 ? "" : "s"}`;
+  $("#create-intake-review").disabled = intakeImages.length === 0;
+  const root = $("#intake-preview-grid");
+  root.replaceChildren();
+  for (const [index, image] of intakeImages.entries()) {
+    const item = document.createElement("div");
+    item.className = "preview-item";
+    item.innerHTML = `
+      <img src="${escapeHtml(image.url)}" alt="${escapeHtml(image.name)}" />
+      <button type="button" aria-label="Remove image">x</button>
+    `;
+    item.querySelector("button").addEventListener("click", () => {
+      URL.revokeObjectURL(image.url);
+      intakeImages = intakeImages.filter((_, imageIndex) => imageIndex !== index);
+      renderIntake();
+    });
+    root.append(item);
+  }
+}
+
+function fillIntakeDraft() {
+  const primary = intakeImages[0];
+  const name = inferProductName(primary?.name || "New Product");
+  if (!$("#intake-product-name").value.trim()) {
+    $("#intake-product-name").value = name;
+  }
+  if (!$("#intake-description").value.trim()) {
+    $("#intake-description").value =
+      `Seller-supplied image draft for ${name}. Verify exact product condition, variants, price, and stock before approving.`;
+  }
+  writeLog("#intake-log", {
+    status: "draft_ready",
+    imageCount: intakeImages.length,
+    source: "extension_side_panel_drag_drop",
+    requiresSellerApproval: true
+  });
+}
+
+function addIntakeFiles(files) {
+  const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
+  intakeImages.push(...images.map((file) => ({
+    name: file.name,
+    url: URL.createObjectURL(file)
+  })));
+  fillIntakeDraft();
+  renderIntake();
+}
+
+function createIntakeReviewDraft() {
+  const now = new Date().toISOString();
+  const productId = `sidepanel-${Date.now()}`;
+  const product = {
+    id: productId,
+    title: $("#intake-product-name").value.trim() || inferProductName(intakeImages[0]?.name || "New Product"),
+    sku: `SIDE-${Date.now()}`,
+    category: $("#intake-category").value.trim() || "Fashion Accessories",
+    price: Number($("#intake-price").value || 19.9),
+    currency: "SGD",
+    stock: Number.parseInt($("#intake-stock").value || "20", 10),
+    description: $("#intake-description").value.trim(),
+    evidence: [{
+      sourceId: "extension-sidepanel-intake",
+      sourceType: "image",
+      locator: intakeImages.map((image) => image.name).join(", "),
+      excerpt: "Seller dragged product images into the Chrome extension side panel.",
+      confidence: 0.75
+    }],
+    media: {
+      images: intakeImages.map((image, index) => ({
+        id: `${productId}-image-${index}`,
+        uri: image.url,
+        alt: image.name,
+        citations: [{
+          sourceId: "extension-sidepanel-intake",
+          sourceType: "image",
+          locator: image.name,
+          excerpt: `Seller supplied product photo copied from side-panel file: ${image.name}`,
+          confidence: 0.75
+        }]
+      }))
+    }
+  };
+  const item = {
+    localOnly: true,
+    createdAt: now,
+    reviewItemId: `review-${productId}`,
+    productId,
+    product,
+    decision: {
+      status: "pending",
+      citations: product.evidence
+    },
+    reviewRequiredReason: "Seller-created side-panel image draft requires approval before publish.",
+    suggestedActions: [
+      "Verify image accuracy",
+      "Confirm price and stock",
+      "Approve or save edits before creating Shopee product"
+    ]
+  };
+  state.intakeReviewItems = [item, ...state.intakeReviewItems];
+  state.createProductCommands = [];
+  state.startLivestreamCommands = [];
+  renderReviewPlan();
+  renderCommands();
+  writeLog("#intake-log", {
+    status: "review_draft_created",
+    productId,
+    imageCount: intakeImages.length,
+    note: "Draft is local to the side panel until seller approval/publish integration."
+  });
+}
+
+function clearIntake() {
+  for (const image of intakeImages) {
+    URL.revokeObjectURL(image.url);
+  }
+  intakeImages = [];
+  $("#intake-product-name").value = "";
+  $("#intake-description").value = "";
+  renderIntake();
+  writeLog("#intake-log", "Drop images to begin.");
+}
+
 function renderCommands() {
   $("#execute-create-products").disabled = state.createProductCommands.length === 0;
   $("#prepare-livestream").disabled = state.startLivestreamCommands.length === 0;
@@ -233,6 +381,26 @@ async function loadReviewPlan() {
 
 async function submitDecision(card, item, status) {
   const decision = buildDecision(card, item, status);
+  if (item.localOnly) {
+    state.intakeReviewItems = state.intakeReviewItems.map((candidate) =>
+      candidate.productId === item.productId
+        ? {
+            ...candidate,
+            decision,
+            localApprovalStatus: decision.status
+          }
+        : candidate
+    );
+    renderReviewPlan();
+    renderCommands();
+    writeLog("#intake-log", {
+      status: "local_review_decision_recorded",
+      productId: item.productId,
+      decision: decision.status,
+      note: "Side-panel image drafts are reviewable now; Shopee create_product commands still require server-backed ingestion."
+    });
+    return;
+  }
   const response = await fetchJson("/api/prep/review-decisions", {
     method: "POST",
     body: JSON.stringify({
@@ -511,6 +679,19 @@ function renderCodexEvents() {
 
 $("#load-review-plan").addEventListener("click", () => void loadReviewPlan().catch((error) => writeLog("#review-status", error.message)));
 $("#approve-all").addEventListener("click", () => void approveAll().catch((error) => writeLog("#command-log", error.message)));
+$("#intake-file-input").addEventListener("change", (event) => addIntakeFiles(event.target.files || []));
+$("#intake-dropzone").addEventListener("dragover", (event) => {
+  event.preventDefault();
+  $("#intake-dropzone").classList.add("active");
+});
+$("#intake-dropzone").addEventListener("dragleave", () => $("#intake-dropzone").classList.remove("active"));
+$("#intake-dropzone").addEventListener("drop", (event) => {
+  event.preventDefault();
+  $("#intake-dropzone").classList.remove("active");
+  addIntakeFiles(event.dataTransfer?.files || []);
+});
+$("#create-intake-review").addEventListener("click", createIntakeReviewDraft);
+$("#clear-intake").addEventListener("click", clearIntake);
 $("#execute-create-products").addEventListener("click", executeCreateProducts);
 $("#prepare-livestream").addEventListener("click", prepareLivestream);
 $("#ai-prepare-shopee-preview").addEventListener("click", () => void aiPrepareShopeePreview().catch((error) => writeLog("#livestream-log", error.message)));
@@ -525,4 +706,5 @@ $("#use-captured-message").addEventListener("click", () => void useCapturedMessa
 $("#render-codex-events").addEventListener("click", renderCodexEvents);
 
 void checkRuntime().catch(() => undefined);
+renderIntake();
 updateLaunchChecklist();

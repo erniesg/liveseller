@@ -5,6 +5,7 @@
   "description": "Observes an authenticated seller tab and executes approved LiveSeller commands.",
   "permissions": [
     "activeTab",
+    "sidePanel",
     "scripting",
     "storage"
   ],
@@ -19,6 +20,9 @@
   "background": {
     "service_worker": "background.js",
     "type": "module"
+  },
+  "action": {
+    "default_title": "LiveSeller Shopee Copilot"
   },
   "content_scripts": [
     {
