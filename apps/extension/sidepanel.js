@@ -214,6 +214,7 @@ function updateLaunchChecklist() {
   }
   $("#public-overlay-url").value = publicOverlayUrl();
   $("#camera-preview-url").value = cameraPreviewUrl();
+  $("#go-live").disabled = !state.shopeePreview?.goLiveVisible;
 }
 
 function productFromCard(card, item) {
@@ -269,6 +270,21 @@ function buildDecision(card, item, status) {
       : "Seller approved this product from the Chrome side panel.",
     editedProduct: edited ? editedProduct : undefined,
     citations: item.product.evidence
+  };
+}
+
+function buildLocalCreateProductCommand(item, decision) {
+  const product = decision.editedProduct || item.product;
+  return {
+    commandId: `cmd-create-${liveSessionId()}-${item.productId}`,
+    sessionId: liveSessionId(),
+    productId: item.productId,
+    kind: "create_product",
+    createdAt: new Date().toISOString(),
+    approvalDecisionId: decision.decisionId,
+    approvalStatus: decision.status === "edited" ? "edited" : "approved",
+    payload: { product },
+    citations: product.evidence
   };
 }
 
@@ -371,10 +387,29 @@ function createIntakeReviewDraft() {
     id: productId,
     title: $("#intake-product-name").value.trim() || inferProductName(intakeImages[0]?.name || "New Product"),
     sku: `SIDE-${Date.now()}`,
+    aliases: [$("#intake-product-name").value.trim() || inferProductName(intakeImages[0]?.name || "New Product")],
     category: $("#intake-category").value.trim() || "Fashion Accessories",
     price: Number($("#intake-price").value || 19.9),
     currency: "SGD",
+    variants: [],
     stock: Number.parseInt($("#intake-stock").value || "20", 10),
+    dimensions: {
+      weightGrams: 100,
+      lengthCm: 10,
+      widthCm: 10,
+      heightCm: 5
+    },
+    shipping: {
+      originCountry: "SG",
+      shipWithinDays: 2,
+      supportedMethods: ["Shopee Standard"],
+      freeShipping: false
+    },
+    returnPolicy: {
+      windowDays: 7,
+      conditions: ["Unused", "Original condition"],
+      exclusions: ["Seller to verify category-specific exclusions before publishing"]
+    },
     description: $("#intake-description").value.trim(),
     evidence: [{
       sourceId: "extension-sidepanel-intake",
@@ -383,6 +418,16 @@ function createIntakeReviewDraft() {
       excerpt: "Seller dragged product images into the Chrome extension side panel.",
       confidence: 0.75
     }],
+    sourceConfidence: 0.75,
+    listingDraft: {
+      title: $("#intake-product-name").value.trim() || inferProductName(intakeImages[0]?.name || "New Product"),
+      description: $("#intake-description").value.trim(),
+      bulletPoints: [
+        "Seller-uploaded image draft",
+        "Price and stock entered in side panel",
+        "Seller must verify Shopee-required fields before publishing"
+      ]
+    },
     media: {
       images: intakeImages.map((image, index) => ({
         id: `${productId}-image-${index}`,
@@ -485,13 +530,25 @@ async function submitDecision(card, item, status) {
           }
         : candidate
     );
+    if (decision.status === "approved" || decision.status === "edited") {
+      const command = buildLocalCreateProductCommand(item, decision);
+      state.createProductCommands = [
+        command,
+        ...state.createProductCommands.filter((candidate) => candidate.productId !== item.productId)
+      ];
+    } else {
+      state.createProductCommands = state.createProductCommands.filter((command) => command.productId !== item.productId);
+    }
     renderReviewPlan();
     renderCommands();
     writeLog("#intake-log", {
       status: "local_review_decision_recorded",
       productId: item.productId,
       decision: decision.status,
-      note: "Side-panel image drafts are reviewable now; Shopee create_product commands still require server-backed ingestion."
+      createProductCommands: state.createProductCommands
+        .filter((command) => command.productId === item.productId)
+        .map((command) => command.commandId),
+      note: "Approved side-panel image drafts now queue create_product commands for the authenticated Shopee seller tab."
     });
     return;
   }
@@ -1020,6 +1077,48 @@ async function queueShopeeProductCreation() {
   void refreshSellerTimeline().catch(() => undefined);
 }
 
+async function confirmShopeeProductPublish() {
+  const approvedCommands = state.createProductCommands.filter((command) =>
+    command.kind === "create_product" &&
+    (command.approvalStatus === "approved" || command.approvalStatus === "edited")
+  );
+  if (approvedCommands.length === 0) {
+    writeLog("#product-creation-log", "No approved create_product command is available.");
+    return;
+  }
+  if (!globalThis.chrome?.runtime?.sendMessage) {
+    writeLog("#product-creation-log", "Chrome extension runtime is required to press Shopee Save and Publish.");
+    return;
+  }
+  const response = await chrome.runtime.sendMessage({
+    type: "liveseller:confirm-product-publish",
+    commands: approvedCommands
+  });
+  state.createProductExecuted = Boolean(response?.ok);
+  updateLaunchChecklist();
+  writeLog("#product-creation-log", {
+    status: response?.ok ? "submitted_authenticated_shopee_product_form" : "product_publish_not_submitted",
+    commands: approvedCommands.map((command) => command.commandId),
+    result: response
+  });
+  void refreshSellerTimeline().catch(() => undefined);
+}
+
+async function confirmShopeeGoLive() {
+  if (!globalThis.chrome?.runtime?.sendMessage) {
+    writeLog("#livestream-log", "Chrome extension runtime is required to press Shopee Go Live.");
+    return;
+  }
+  const response = await chrome.runtime.sendMessage({
+    type: "liveseller:confirm-go-live"
+  });
+  writeLog("#livestream-log", {
+    status: response?.ok ? "confirmed_go_live_clicked" : "go_live_not_clicked",
+    result: response
+  });
+  void refreshSellerTimeline().catch(() => undefined);
+}
+
 async function useCapturedMessage() {
   const stored = await globalThis.chrome?.storage?.session?.get("liveseller:lastViewerMessage");
   const message = stored?.["liveseller:lastViewerMessage"];
@@ -1161,6 +1260,8 @@ $("#open-shopee-live").addEventListener("click", openShopeeLiveSetup);
 $("#send-viewer-message").addEventListener("click", () => void sendViewerMessage().catch((error) => writeLog("#suggestion-log", error.message)));
 $("#send-safe-reply").addEventListener("click", () => void sendLowRiskReplyThroughShopeeTab().catch((error) => writeLog("#suggestion-log", error.message)));
 $("#queue-shopee-product-creation").addEventListener("click", () => void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message)));
+$("#confirm-shopee-product-publish").addEventListener("click", () => void confirmShopeeProductPublish().catch((error) => writeLog("#product-creation-log", error.message)));
+$("#go-live").addEventListener("click", () => void confirmShopeeGoLive().catch((error) => writeLog("#livestream-log", error.message)));
 $("#send-host-caption").addEventListener("click", () => void sendHostCaption().catch((error) => writeLog("#realtime-log", error.message)));
 $("#request-realtime-session").addEventListener("click", () => void requestRealtimeSession());
 $("#start-realtime-agent").addEventListener("click", () => void startRealtimeAgent().catch((error) => writeLog("#realtime-log", error.message)));

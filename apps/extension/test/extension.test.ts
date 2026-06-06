@@ -12,6 +12,7 @@ import {
 } from "@liveseller/contracts";
 import {
   executeSellerCommand,
+  executeConfirmedShopeeGoLive,
   executeQueuedShopeeCreateProductCommand,
   executeQueuedSellerReply,
   executeShopeeCreateProductCommand,
@@ -106,6 +107,48 @@ describe("Shopee extension command safety", () => {
     expect((document.querySelector("input[name='stock']") as HTMLInputElement).value)
       .toBe(String(validShopeeCreateProductCommand.payload.product.stock));
     expect(result.submitted).toBe(false);
+  });
+
+  it("submits Shopee product forms only after explicit seller confirmation", () => {
+    let clicked = 0;
+    document.body.innerHTML = `
+      <input placeholder="Brand Name + Product Type + Key Features (Materials, Colors, Size, Model)" />
+      <textarea name="description"></textarea>
+      <input name="price" />
+      <input name="stock" />
+      <input name="sku" />
+      <button type="button">Save and Publish</button>
+    `;
+    document.querySelector("button")?.addEventListener("click", () => {
+      clicked += 1;
+    });
+
+    const fillOnly = executeQueuedShopeeCreateProductCommand(validShopeeCreateProductCommand, document);
+    expect(fillOnly.toolResult.status).toBe("applied");
+    expect(fillOnly.submitted).toBe(false);
+    expect(clicked).toBe(0);
+
+    const submitted = executeQueuedShopeeCreateProductCommand(validShopeeCreateProductCommand, document, {
+      submit: true
+    });
+    expect(submitted.toolResult.status).toBe("applied");
+    expect(submitted.submitted).toBe(true);
+    expect(clicked).toBe(1);
+  });
+
+  it("clicks Go Live only through explicit confirmed livestream execution", () => {
+    let clicked = 0;
+    document.body.innerHTML = '<button type="button">Go Live</button>';
+    document.querySelector("button")?.addEventListener("click", () => {
+      clicked += 1;
+    });
+
+    const result = executeConfirmedShopeeGoLive(document);
+
+    expect(result.toolResult.status).toBe("applied");
+    expect(result.goLivePressed).toBe(true);
+    expect(clicked).toBe(1);
+    expect(JSON.stringify(result).toLowerCase()).not.toContain("rtmp://");
   });
 
   it("queues low-risk replies into the Shopee composer without overwriting seller typing", () => {
@@ -486,6 +529,7 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Apply background");
     expect(sidePanel).toContain("Send low risk reply through Shopee tab");
     expect(sidePanel).toContain("Queue Shopee product creation");
+    expect(sidePanel).toContain("Confirm Save and Publish");
     expect(sidePanel).toContain("Product script suggestion");
     expect(sidePanel).toContain("Load scripts");
     expect(sidePanel).toContain("Start realtime agent");
@@ -525,6 +569,8 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("/api/overlay/");
     expect(sidePanelScript).toContain("sendLowRiskReplyThroughShopeeTab");
     expect(sidePanelScript).toContain("queueShopeeProductCreation");
+    expect(sidePanelScript).toContain("confirmShopeeProductPublish");
+    expect(sidePanelScript).toContain("confirmShopeeGoLive");
     expect(sidePanelScript).toContain("operatorBuildCreateProducts");
     expect(sidePanelScript).toContain("updateLaunchChecklist");
     expect(sidePanelScript).toContain("present_redacted");
@@ -532,6 +578,8 @@ describe("Shopee extension command safety", () => {
     expect(background).toContain("openPanelOnActionClick");
     expect(background).toContain("prepareShopeeTestPreview");
     expect(background).toContain("liveseller:prepare-shopee-test-preview");
+    expect(background).toContain("liveseller:confirm-product-publish");
+    expect(background).toContain("liveseller:confirm-go-live");
     expect(contentScript).toContain("data-viewer-id");
     expect(`${sidePanel}\n${sidePanelScript}\n${background}\n${contentScript}`).not.toMatch(/OPENAI_API_KEY|sk-/i);
   });

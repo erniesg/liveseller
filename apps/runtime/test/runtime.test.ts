@@ -179,6 +179,33 @@ describe("live brain policy runtime", () => {
     );
   });
 
+  it("audits policy flags and approval requests for risky viewer messages", () => {
+    const result = routeRuntimeEvent(
+      viewerEvent("Can you give me extra discount cheaper best price?", "en"),
+      validLiveSessionSpec
+    );
+
+    expect(result.actions.some((action) => action.type === "send_reply")).toBe(false);
+    expect(result.actions.every((action) => action.requiresApproval)).toBe(true);
+    expect(result.auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "policy",
+          actor: "runtime",
+          reason: "Discount negotiation may create unauthorized pricing commitments."
+        }),
+        expect.objectContaining({
+          kind: "approval",
+          actor: "runtime",
+          approval: expect.objectContaining({
+            status: "pending",
+            sessionId: validLiveSessionSpec.sessionId
+          })
+        })
+      ])
+    );
+  });
+
   it("keeps realtime voice translation client secrets server-owned", async () => {
     const missing = await createRealtimeClientSecret({
       apiKey: "",

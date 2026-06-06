@@ -26,6 +26,11 @@ export type ExecutedProductCommand = {
   submitted?: boolean;
 };
 
+export type ExecutedGoLiveCommand = {
+  toolResult: ToolResult;
+  goLivePressed: boolean;
+};
+
 export type ExecutedLivestreamCommand = {
   toolResult: ToolResult;
   command?: ShopeeStartLivestreamCommand;
@@ -178,9 +183,34 @@ function writeField(
   return fieldName;
 }
 
+function compactText(value: string | null | undefined): string {
+  return String(value ?? "").replace(/\s+/gu, " ").trim().toLowerCase();
+}
+
+function findButtonByText(root: ParentNode, labels: string[]): HTMLButtonElement | undefined {
+  const normalizedLabels = labels.map(compactText);
+  return Array.from(root.querySelectorAll("button")).find((button) => {
+    const text = compactText(button.textContent);
+    return normalizedLabels.some((label) => text === label || text.includes(label));
+  }) as HTMLButtonElement | undefined;
+}
+
+function clickButton(button: HTMLButtonElement | undefined): boolean {
+  if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") {
+    return false;
+  }
+  button.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+  button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  button.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+  button.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, cancelable: true }));
+  button.click();
+  return true;
+}
+
 export function executeQueuedShopeeCreateProductCommand(
   input: unknown,
-  root: ParentNode = document
+  root: ParentNode = document,
+  options: { submit?: boolean } = {}
 ): ExecutedProductCommand {
   const parsed = ShopeeCreateProductCommandSchema.safeParse(input);
   if (!parsed.success) {
@@ -231,11 +261,27 @@ export function executeQueuedShopeeCreateProductCommand(
     };
   }
 
+  const submitted = options.submit
+    ? clickButton(findButtonByText(root, ["Save and Publish", "Save and Delist", "Publish"]))
+    : false;
+
   return {
     toolResult: result(parsed.data.commandId, "applied"),
     command: parsed.data,
     filledFields,
-    submitted: false
+    submitted
+  };
+}
+
+export function executeConfirmedShopeeGoLive(root: ParentNode = document): ExecutedGoLiveCommand {
+  const goLivePressed = clickButton(findButtonByText(root, ["Go Live", "Start Live"]));
+  return {
+    toolResult: result(
+      "confirmed-go-live",
+      goLivePressed ? "applied" : "failed",
+      goLivePressed ? undefined : "Go Live button was not available"
+    ),
+    goLivePressed
   };
 }
 

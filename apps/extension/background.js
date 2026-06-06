@@ -73,7 +73,24 @@ async function findOrCreateShopeeProductTab() {
   return tab;
 }
 
-function fillShopeeCreateProductForm(command) {
+function clickButtonByText(labels) {
+  const normalized = labels.map((label) => String(label).replace(/\s+/g, " ").trim().toLowerCase());
+  const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
+    const text = String(candidate.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    return normalized.some((label) => text === label || text.includes(label));
+  });
+  if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") {
+    return false;
+  }
+  button.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, view: window }));
+  button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+  button.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+  button.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, cancelable: true, view: window }));
+  button.click();
+  return true;
+}
+
+function fillShopeeCreateProductForm(command, options = {}) {
   function write(selectors, value) {
     for (const selector of selectors) {
       const element = document.querySelector(selector);
@@ -108,7 +125,19 @@ function fillShopeeCreateProductForm(command) {
   return {
     ok: filled.length >= 4,
     filled,
-    submitted: false,
+    submitted: options.submit === true
+      ? clickButtonByText(["Save and Publish", "Save and Delist", "Publish"])
+      : false,
+    title: document.title,
+    url: location.href
+  };
+}
+
+function confirmShopeeGoLiveClick() {
+  const ok = clickButtonByText(["Go Live", "Start Live"]);
+  return {
+    ok,
+    goLivePressed: ok,
     title: document.title,
     url: location.href
   };
@@ -314,7 +343,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then((tab) => chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: fillShopeeCreateProductForm,
-        args: [commands[0]]
+        args: [commands[0], { submit: false }]
       }))
       .then(([result]) => sendResponse({
         ok: Boolean(result?.result?.ok),
@@ -326,6 +355,52 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         ok: false,
         status: "queued_for_authenticated_tab",
         commandCount: commands.length,
+        error: error.message
+      }));
+    return true;
+  }
+
+  if (message?.type === "liveseller:confirm-product-publish") {
+    const commands = approvedCreateProductCommands(message.commands);
+    if (commands.length === 0) {
+      sendResponse({ ok: false, status: "no_approved_create_product_commands", commandCount: 0 });
+      return false;
+    }
+    findOrCreateShopeeProductTab()
+      .then((tab) => chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: fillShopeeCreateProductForm,
+        args: [commands[0], { submit: true }]
+      }))
+      .then(([result]) => sendResponse({
+        ok: Boolean(result?.result?.ok && result?.result?.submitted),
+        status: result?.result?.submitted ? "submitted_authenticated_shopee_product_form" : "product_form_submit_not_available",
+        commandCount: commands.length,
+        evidence: result?.result
+      }))
+      .catch((error) => sendResponse({
+        ok: false,
+        status: "product_form_submit_failed",
+        commandCount: commands.length,
+        error: error.message
+      }));
+    return true;
+  }
+
+  if (message?.type === "liveseller:confirm-go-live") {
+    findOrCreateShopeeLiveTab()
+      .then((tab) => chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: confirmShopeeGoLiveClick
+      }))
+      .then(([result]) => sendResponse({
+        ok: Boolean(result?.result?.ok),
+        status: result?.result?.ok ? "confirmed_go_live_clicked" : "go_live_button_not_available",
+        evidence: result?.result
+      }))
+      .catch((error) => sendResponse({
+        ok: false,
+        status: "go_live_click_failed",
         error: error.message
       }));
     return true;
