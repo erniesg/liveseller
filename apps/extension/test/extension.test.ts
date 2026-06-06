@@ -12,6 +12,8 @@ import {
 } from "@liveseller/contracts";
 import {
   executeSellerCommand,
+  executeQueuedShopeeCreateProductCommand,
+  executeQueuedSellerReply,
   executeShopeeCreateProductCommand,
   executeShopeeStartLivestreamCommand
 } from "../src/commandExecutor";
@@ -80,6 +82,49 @@ describe("Shopee extension command safety", () => {
 
     expect(pending.toolResult.status).toBe("rejected");
     expect(pending.command).toBeUndefined();
+  });
+
+  it("fills authenticated Shopee product form fields from approved create-product commands", () => {
+    document.body.innerHTML = `
+      <input name="product_name" />
+      <textarea name="description"></textarea>
+      <input name="price" />
+      <input name="stock" />
+      <input name="sku" />
+      <button type="button">Save and Publish</button>
+    `;
+
+    const result = executeQueuedShopeeCreateProductCommand(validShopeeCreateProductCommand, document);
+
+    expect(result.toolResult.status).toBe("applied");
+    expect((document.querySelector("input[name='product_name']") as HTMLInputElement).value)
+      .toBe(validShopeeCreateProductCommand.payload.product.title);
+    expect((document.querySelector("textarea[name='description']") as HTMLTextAreaElement).value)
+      .toBe(validShopeeCreateProductCommand.payload.product.description);
+    expect((document.querySelector("input[name='price']") as HTMLInputElement).value)
+      .toBe(String(validShopeeCreateProductCommand.payload.product.price));
+    expect((document.querySelector("input[name='stock']") as HTMLInputElement).value)
+      .toBe(String(validShopeeCreateProductCommand.payload.product.stock));
+    expect(result.submitted).toBe(false);
+  });
+
+  it("queues low-risk replies into the Shopee composer without overwriting seller typing", () => {
+    document.body.innerHTML = `
+      <textarea data-liveseller-composer></textarea>
+      <button data-liveseller-send>Send</button>
+    `;
+
+    const applied = executeQueuedSellerReply(validLiveAction, document);
+
+    expect(applied.toolResult.status).toBe("applied");
+    expect((document.querySelector("[data-liveseller-composer]") as HTMLTextAreaElement).value)
+      .toBe(validLiveAction.payload.kind === "send_reply" ? validLiveAction.payload.text : "");
+    expect(applied.publicSend).toBe(true);
+
+    const composer = document.querySelector("[data-liveseller-composer]") as HTMLTextAreaElement;
+    composer.value = "seller is typing";
+    const skipped = executeQueuedSellerReply(validLiveAction, document);
+    expect(skipped.toolResult.status).toBe("skipped");
   });
 
   it("prepares Shopee livestream creation with redacted stream credential evidence", () => {
@@ -437,6 +482,9 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Apply background");
     expect(sidePanel).toContain("Send low risk reply through Shopee tab");
     expect(sidePanel).toContain("Queue Shopee product creation");
+    expect(sidePanel).toContain("Product script suggestion");
+    expect(sidePanel).toContain("Load scripts");
+    expect(sidePanel).toContain("Start realtime agent");
     expect(sidePanel).toContain("Verify Shopee camera/video preview and overlay feed manually.");
     expect(sidePanel).toContain('script src="sidepanel.js"');
     expect(sidePanelScript).toContain("/api/prep/review-plan/");
@@ -444,7 +492,9 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("extension_side_panel_drag_drop");
     expect(sidePanelScript).toContain("/api/prep/review-decisions");
     expect(sidePanelScript).toContain("/api/runtime/events");
-    expect(sidePanelScript).toContain("/api/runtime/realtime/session");
+    expect(sidePanelScript).toContain("/api/runtime/realtime/agent-session");
+    expect(sidePanelScript).toContain("/api/live-sessions/");
+    expect(sidePanelScript).not.toContain("speechSynthesis");
     expect(sidePanelScript).toContain("publicOverlayUrl");
     expect(sidePanelScript).toContain("cameraPreviewUrl");
     expect(sidePanelScript).toContain("openShopeeLiveSetup");

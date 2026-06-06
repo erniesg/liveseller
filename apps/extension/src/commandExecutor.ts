@@ -22,6 +22,8 @@ export type ExecutedCommand = {
 export type ExecutedProductCommand = {
   toolResult: ToolResult;
   command?: ShopeeCreateProductCommand;
+  filledFields?: string[];
+  submitted?: boolean;
 };
 
 export type ExecutedLivestreamCommand = {
@@ -145,6 +147,122 @@ export function executeShopeeCreateProductCommand(input: unknown): ExecutedProdu
     toolResult: result(parsed.data.commandId, "applied"),
     command: parsed.data
   };
+}
+
+function firstElement<T extends HTMLInputElement | HTMLTextAreaElement>(
+  root: ParentNode,
+  selectors: string[]
+): T | undefined {
+  for (const selector of selectors) {
+    const node = root.querySelector(selector);
+    if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+      return node as T;
+    }
+  }
+  return undefined;
+}
+
+function writeField(
+  root: ParentNode,
+  selectors: string[],
+  value: string,
+  fieldName: string
+): string | undefined {
+  const element = firstElement(root, selectors);
+  if (!element) {
+    return undefined;
+  }
+  element.value = value;
+  element.dispatchEvent(new Event("input", { bubbles: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+  return fieldName;
+}
+
+export function executeQueuedShopeeCreateProductCommand(
+  input: unknown,
+  root: ParentNode = document
+): ExecutedProductCommand {
+  const parsed = ShopeeCreateProductCommandSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      toolResult: result(
+        readCommandId(input),
+        "rejected",
+        "create_product requires approved or edited product review state"
+      )
+    };
+  }
+
+  const product = parsed.data.payload.product;
+  const filledFields = [
+    writeField(root, [
+      "[name='product_name']",
+      "[name='name']",
+      "input[placeholder*='Product Name' i]",
+      "input[placeholder*='product name' i]"
+    ], product.title, "title"),
+    writeField(root, [
+      "textarea[name='description']",
+      "[name='description']",
+      "textarea[placeholder*='description' i]"
+    ], product.description, "description"),
+    writeField(root, [
+      "[name='price']",
+      "input[placeholder*='price' i]"
+    ], String(product.price), "price"),
+    writeField(root, [
+      "[name='stock']",
+      "input[placeholder*='stock' i]"
+    ], String(product.stock), "stock"),
+    writeField(root, [
+      "[name='sku']",
+      "input[placeholder*='sku' i]"
+    ], product.sku, "sku")
+  ].filter((field): field is string => Boolean(field));
+
+  if (filledFields.length < 4) {
+    return {
+      toolResult: result(parsed.data.commandId, "failed", "Shopee product form selectors were not available"),
+      command: parsed.data,
+      filledFields,
+      submitted: false
+    };
+  }
+
+  return {
+    toolResult: result(parsed.data.commandId, "applied"),
+    command: parsed.data,
+    filledFields,
+    submitted: false
+  };
+}
+
+export function executeQueuedSellerReply(
+  action: LiveAction,
+  root: ParentNode = document
+): ExecutedCommand {
+  const composer = firstElement(root, [
+    "[data-liveseller-composer]",
+    "textarea[placeholder*='message' i]",
+    "textarea",
+    "input[placeholder*='message' i]"
+  ]);
+  const composerState = {
+    value: composer?.value ?? "",
+    isSellerTyping: Boolean(composer?.value.trim())
+  };
+  const executed = executeSellerCommand(action, composerState);
+
+  if (executed.toolResult.status === "applied" && action.payload.kind === "send_reply" && composer) {
+    composer.value = action.payload.text;
+    composer.dispatchEvent(new Event("input", { bubbles: true }));
+    const button = root.querySelector("[data-liveseller-send], button[type='submit']");
+    if (button instanceof HTMLButtonElement) {
+      button.click();
+    }
+  }
+
+  return executed;
 }
 
 export function executeShopeeStartLivestreamCommand(input: unknown): ExecutedLivestreamCommand {

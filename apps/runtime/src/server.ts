@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { type ChildProcess, spawn } from "node:child_process";
 import {
+  type LiveSessionSpec,
   OverlayStateSchema,
   ProductReviewDecisionSchema,
   ProductReviewPlanSchema,
@@ -86,6 +87,139 @@ export async function createRealtimeClientSecret(options: {
   };
 }
 
+function requireSessionStore(sessionId: string) {
+  const store = sessionStores.get(sessionId);
+  if (!store) {
+    throw new Error(`Runtime session not found: ${sessionId}`);
+  }
+  return store;
+}
+
+export type RealtimeAgentSessionResponse = {
+  status: number;
+  body: unknown;
+};
+
+function realtimeAgentInstructions(session: LiveSessionSpec): string {
+  return [
+    "You are a LiveSeller RealtimeAgent for a Shopee Live seller.",
+    "Listen to the seller's speech in Chinese, English, Malay, or Tamil.",
+    "When requested, translate host speech to English audio in real time while preserving exact product names, prices, stock, SKU, variants, and promo terms.",
+    "prompt the seller what to say next using only structured product facts and policy facts from this session.",
+    "Call tools for overlay/background changes and policy-checked replies; never invent discounts, refund commitments, legal claims, stock, variants, Shopee IDs, or promo eligibility.",
+    "Risky viewer messages about refund, fraud, fake products, legal threats, or unclear discounts must be escalated for seller approval instead of auto-sent.",
+    `Session ${session.sessionId} products: ${session.products.map((product) =>
+      `${product.title} (${product.currency} ${product.price.toFixed(2)}, ${product.stock} left, SKU ${product.sku})`
+    ).join("; ")}.`
+  ].join(" ");
+}
+
+export async function createRealtimeAgentSession(input: {
+  apiKey?: string;
+  fetchImpl?: typeof fetch;
+  sessionId: string;
+  voice?: string;
+  model?: string;
+}): Promise<RealtimeAgentSessionResponse> {
+  const apiKey = input.apiKey ?? process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return {
+      status: 503,
+      body: {
+        error: "openai_api_key_missing",
+        message: "Set OPENAI_API_KEY on the runtime server to start the LiveSeller RealtimeAgent."
+      }
+    };
+  }
+  const store = requireSessionStore(input.sessionId);
+  const session = store.snapshot().session;
+  const response = await (input.fetchImpl ?? fetch)("https://api.openai.com/v1/realtime/client_secrets", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      session: {
+        type: "realtime",
+        model: input.model ?? process.env.OPENAI_REALTIME_MODEL ?? "gpt-realtime",
+        instructions: realtimeAgentInstructions(session),
+        audio: {
+          output: {
+            voice: input.voice ?? process.env.OPENAI_REALTIME_VOICE ?? "marin"
+          }
+        },
+        tools: [
+          {
+            type: "function",
+            name: "show_overlay_background",
+            description: "Change the public overlay background after seller approval.",
+            parameters: {
+              type: "object",
+              properties: {
+                mode: { type: "string", enum: ["solid", "default"] },
+                value: { type: "string" },
+                label: { type: "string" }
+              },
+              required: ["mode", "value", "label"],
+              additionalProperties: false
+            }
+          },
+          {
+            type: "function",
+            name: "send_policy_checked_reply",
+            description: "Send only low-risk structured replies; risky replies must ask seller approval first.",
+            parameters: {
+              type: "object",
+              properties: {
+                viewerId: { type: "string" },
+                text: { type: "string" },
+                productId: { type: "string" },
+                risk: { type: "string", enum: ["low"] }
+              },
+              required: ["viewerId", "text", "risk"],
+              additionalProperties: false
+            }
+          }
+        ]
+      }
+    })
+  });
+
+  return {
+    status: response.status,
+    body: {
+      ...(await response.json()),
+      agent: {
+        name: "LiveSeller Realtime Copilot",
+        kind: "RealtimeAgent",
+        sessionId: input.sessionId,
+        responsibilities: [
+          "prompt_seller_script",
+          "translate_host_speech_to_english_audio",
+          "policy_checked_viewer_reply_tools",
+          "overlay_background_tools"
+        ]
+      }
+    }
+  };
+}
+
+export function buildProductScriptSuggestions(session: LiveSessionSpec): ProductScriptSuggestion[] {
+  return session.products.map((product) => ({
+    productId: product.id,
+    title: product.title,
+    script:
+      `Show ${product.title}. Mention ${product.currency} ${product.price.toFixed(2)}, ${product.stock} left, SKU ${product.sku}. ` +
+      "Keep claims tied to the structured listing and invite viewers to ask about size, stock, and shipping.",
+    facts: {
+      price: `${product.currency} ${product.price.toFixed(2)}`,
+      stock: `${product.stock} left`,
+      sku: product.sku
+    }
+  }));
+}
+
 async function readJson(req: import("node:http").IncomingMessage) {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -111,6 +245,19 @@ export type RuntimeCompositorResult = {
   rtmpUrl: "present_redacted";
   rtmpKey: "present_redacted";
   durationSeconds: number;
+  outputOrientation: "vertical";
+  outputSize: "720x1280";
+};
+
+export type ProductScriptSuggestion = {
+  productId: string;
+  title: string;
+  script: string;
+  facts: {
+    price: string;
+    stock: string;
+    sku: string;
+  };
 };
 
 export type RuntimeCompositorStatus = {
@@ -122,6 +269,8 @@ export type RuntimeCompositorStatus = {
   rtmpUrl?: "present_redacted";
   rtmpKey?: "present_redacted";
   durationSeconds?: number;
+  outputOrientation?: "vertical";
+  outputSize?: "720x1280";
   startedAt?: string;
   stoppedAt?: string;
   exitCode?: number | null;
@@ -225,6 +374,8 @@ export async function startRuntimeCameraCompositor(input: {
   const durationSeconds = input.durationSeconds ?? 60;
   const cameraInputKind = input.cameraInputKind ?? "lavfi";
   const cameraInput = input.cameraInput ?? "testsrc2=size=1280x720:rate=30";
+  const outputOrientation = "vertical";
+  const outputSize = "720x1280";
   const streamSignature = `${input.rtmpUrl}\n${input.rtmpKey}`;
   if (activeRuntimeCompositor) {
     throw new Error(
@@ -240,6 +391,9 @@ export async function startRuntimeCameraCompositor(input: {
       LIVESELLER_CAMERA_INPUT: cameraInput,
       LIVESELLER_CAMERA_INPUT_KIND: cameraInputKind,
       LIVESELLER_OVERLAY_URL: input.overlayUrl,
+      LIVESELLER_STREAM_HEIGHT: "1280",
+      LIVESELLER_STREAM_ORIENTATION: outputOrientation,
+      LIVESELLER_STREAM_WIDTH: "720",
       LIVESELLER_STREAM_SECONDS: String(durationSeconds),
       SHOPEE_RTMP_URL: input.rtmpUrl,
       SHOPEE_RTMP_KEY: input.rtmpKey
@@ -262,6 +416,8 @@ export async function startRuntimeCameraCompositor(input: {
     rtmpUrl: "present_redacted",
     rtmpKey: "present_redacted",
     durationSeconds,
+    outputOrientation,
+    outputSize,
     startedAt: new Date().toISOString()
   };
   activeRuntimeCompositor = {
@@ -318,7 +474,9 @@ export async function startRuntimeCameraCompositor(input: {
     cameraInput: redactCameraInput(cameraInputKind, cameraInput),
     rtmpUrl: "present_redacted",
     rtmpKey: "present_redacted",
-    durationSeconds
+    durationSeconds,
+    outputOrientation,
+    outputSize
   };
 }
 
@@ -452,6 +610,20 @@ export function createRuntimeServer() {
         return;
       }
 
+      const scriptSessionId = sessionIdFromUrl(req.url, /^\/api\/live-sessions\/([^/]+)\/script-suggestions$/u);
+      if (req.method === "GET" && scriptSessionId) {
+        const store = sessionStores.get(scriptSessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        sendJson(res, 200, {
+          sessionId: scriptSessionId,
+          suggestions: buildProductScriptSuggestions(store.snapshot().session)
+        });
+        return;
+      }
+
       if (req.method === "POST" && req.url === "/api/runtime/events") {
         const event = RuntimeEventSchema.parse(await readJson(req));
         const store = sessionStores.get(event.sessionId);
@@ -467,6 +639,26 @@ export function createRuntimeServer() {
       if (req.method === "POST" && req.url === "/api/runtime/realtime/session") {
         const session = await createRealtimeClientSecret();
         sendJson(res, session.status, session.body);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/runtime/realtime/agent-session") {
+        const body = await readJson(req);
+        const session = await createRealtimeAgentSession({
+          sessionId: String(body.sessionId ?? validLiveSessionSpec.sessionId),
+          voice: typeof body.voice === "string" ? body.voice : undefined
+        });
+        sendJson(res, session.status, session.body);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/runtime/realtime/agent-session") {
+        const body = await readJson(req);
+        const result = await createRealtimeAgentSession({
+          sessionId: String(body.sessionId ?? ""),
+          voice: typeof body.voice === "string" ? body.voice : undefined
+        });
+        sendJson(res, result.status, result.body);
         return;
       }
 

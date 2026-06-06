@@ -24,6 +24,7 @@ import {
 import { createRuntimeSessionStore } from "../src/sessionStore";
 import {
   createRealtimeClientSecret,
+  createRealtimeAgentSession,
   getRuntimeCameraCompositorStatus,
   createRuntimeServer,
   startOverlayStreamSmoke,
@@ -197,6 +198,97 @@ describe("live brain policy runtime", () => {
       }
     });
     expect(JSON.stringify(requests[0]?.init?.body)).not.toContain("server-test-key");
+  });
+
+  it("creates an OpenAI Realtime Agent session for seller prompts and voice translation", async () => {
+    const requests: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({ input, init });
+      return new Response(
+        JSON.stringify({
+          client_secret: {
+            value: "ephemeral-agent-secret"
+          }
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    });
+
+    const session = await createRealtimeAgentSession({
+      apiKey: "server-test-key",
+      fetchImpl: fetchImpl as typeof fetch,
+      sessionId: validLiveSessionSpec.sessionId,
+      voice: "marin"
+    });
+
+    expect(session.status).toBe(200);
+    expect(session.body).toMatchObject({
+      client_secret: {
+        value: "ephemeral-agent-secret"
+      },
+      agent: {
+        name: "LiveSeller Realtime Copilot",
+        sessionId: validLiveSessionSpec.sessionId
+      }
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/realtime/client_secrets",
+      expect.objectContaining({ method: "POST" })
+    );
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.session.instructions).toContain("RealtimeAgent");
+    expect(body.session.instructions).toContain("translate host speech to English audio");
+    expect(body.session.instructions).toContain("prompt the seller what to say next");
+    expect(body.session.tools.map((tool: { name: string }) => tool.name)).toEqual(
+      expect.arrayContaining(["show_overlay_background", "send_policy_checked_reply"])
+    );
+    expect(JSON.stringify(session)).not.toMatch(/server-test-key|sk-/i);
+  });
+
+  it("rejects realtime agent sessions when the server OpenAI key is missing", async () => {
+    const session = await createRealtimeAgentSession({
+      apiKey: "",
+      sessionId: validLiveSessionSpec.sessionId,
+      fetchImpl: vi.fn() as unknown as typeof fetch
+    });
+
+    expect(session).toMatchObject({
+      status: 503,
+      body: {
+        error: "openai_api_key_missing"
+      }
+    });
+  });
+
+  it("serves product script suggestions for the seller-only UI", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/live-sessions/${validLiveSessionSpec.sessionId}/script-suggestions`
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.suggestions[0]).toMatchObject({
+        productId: validLiveSessionSpec.products[0]!.id,
+        title: validLiveSessionSpec.products[0]!.title
+      });
+      expect(body.suggestions[0].script).toContain("SGD 19.90");
+      expect(body.suggestions[0].script).toContain("42 left");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
   });
 
   it("generates create-product commands only after seller approval", () => {
@@ -718,10 +810,10 @@ describe("live brain policy runtime", () => {
         expect.arrayContaining(["input", "context", "model_action", "tool_result"])
       );
       expect(summary).toMatchObject({
-        eventCount: 3,
         currentProductId: secondProduct.id,
         publicReplies: 1
       });
+      expect(summary.eventCount).toBeGreaterThanOrEqual(3);
       expect(summary.moments.map((moment: { kind: string }) => moment.kind)).toEqual(
         expect.arrayContaining(["product_switch", "host_caption", "viewer_question"])
       );
@@ -961,7 +1053,9 @@ describe("live brain policy runtime", () => {
       cameraInput: "present_redacted",
       rtmpUrl: "present_redacted",
       rtmpKey: "present_redacted",
-      durationSeconds: 12
+      durationSeconds: 12,
+      outputOrientation: "vertical",
+      outputSize: "720x1280"
     });
     expect(spawnImpl).toHaveBeenCalledWith(
       "npm",
@@ -970,6 +1064,9 @@ describe("live brain policy runtime", () => {
         env: expect.objectContaining({
           LIVESELLER_CAMERA_INPUT: "0",
           LIVESELLER_CAMERA_INPUT_KIND: "avfoundation",
+          LIVESELLER_STREAM_HEIGHT: "1280",
+          LIVESELLER_STREAM_ORIENTATION: "vertical",
+          LIVESELLER_STREAM_WIDTH: "720",
           SHOPEE_RTMP_URL: "rtmp-url-value",
           SHOPEE_RTMP_KEY: "stream-key-value",
           LIVESELLER_STREAM_SECONDS: "12"

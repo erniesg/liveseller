@@ -521,14 +521,51 @@ async function sendHostCaption() {
 
 async function requestRealtimeSession() {
   try {
-    const session = await fetchJson("/api/runtime/realtime/session", { method: "POST", body: "{}" });
+    const session = await startRealtimeAgent();
     writeLog("#realtime-log", {
-      status: "ephemeral_client_secret_received",
+      status: "openai_realtime_agent_session_ready",
+      agent: session.agent,
       clientSecretPresent: !!session.client_secret,
-      note: "Use this only in the seller-private side panel or seller console."
+      note: "Use the returned ephemeral client secret with @openai/agents/realtime in the seller-private UI."
     });
   } catch (error) {
     writeLog("#realtime-log", error.message);
+  }
+}
+
+async function startRealtimeAgent() {
+  const response = await fetchJson("/api/runtime/realtime/agent-session", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId: liveSessionId(),
+      voice: "marin"
+    })
+  });
+  writeLog("#realtime-log", {
+    status: "openai_realtime_agent_session_ready",
+    clientSecretPresent: !!response.client_secret,
+    agent: response.agent,
+    note: "Use the returned ephemeral client secret with @openai/agents/realtime in the seller-private UI."
+  });
+  return response;
+}
+
+async function loadProductScripts() {
+  const response = await fetchJson(`/api/live-sessions/${encodeURIComponent(liveSessionId())}/script-suggestions`);
+  const root = $("#script-suggestion-log");
+  root.replaceChildren();
+  for (const suggestion of response.suggestions || []) {
+    const card = document.createElement("article");
+    card.className = "suggestion-card";
+    card.innerHTML = `
+      <span class="tag">${escapeHtml(suggestion.facts?.price || "")}</span>
+      <strong>${escapeHtml(suggestion.title)}</strong>
+      <p>${escapeHtml(suggestion.script)}</p>
+    `;
+    root.append(card);
+  }
+  if (!response.suggestions?.length) {
+    root.textContent = "No script suggestions returned.";
   }
 }
 
@@ -829,6 +866,8 @@ $("#send-safe-reply").addEventListener("click", () => void sendLowRiskReplyThrou
 $("#queue-shopee-product-creation").addEventListener("click", () => void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message)));
 $("#send-host-caption").addEventListener("click", () => void sendHostCaption().catch((error) => writeLog("#realtime-log", error.message)));
 $("#request-realtime-session").addEventListener("click", () => void requestRealtimeSession());
+$("#start-realtime-agent").addEventListener("click", () => void startRealtimeAgent().catch((error) => writeLog("#realtime-log", error.message)));
+$("#load-product-scripts").addEventListener("click", () => void loadProductScripts().catch((error) => writeLog("#script-suggestion-log", error.message)));
 $("#use-captured-message").addEventListener("click", () => void useCapturedMessage());
 $("#render-codex-events").addEventListener("click", renderCodexEvents);
 

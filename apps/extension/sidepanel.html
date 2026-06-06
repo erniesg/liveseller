@@ -196,7 +196,7 @@
             <h2>Host voice and overlays</h2>
             <p>Send host captions to public overlay; realtime voice uses a server-minted ephemeral client secret.</p>
           </div>
-          <button id="request-realtime-session" type="button">Request realtime session</button>
+          <button id="request-realtime-session" type="button">Start realtime agent</button>
         </div>
         <label>
           Host caption
@@ -211,8 +211,22 @@
             <option value="ta">Tamil</option>
           </select>
         </label>
-        <button id="send-host-caption" type="button">Send caption to overlay</button>
-        <div id="realtime-log" class="log">Realtime session not requested.</div>
+        <div class="button-row">
+          <button id="send-host-caption" type="button">Send caption to overlay</button>
+          <button id="start-realtime-agent" type="button">Start realtime agent</button>
+        </div>
+        <div id="realtime-log" class="log">OpenAI RealtimeAgent not started.</div>
+      </section>
+
+      <section class="panel" aria-label="Product script suggestion">
+        <div class="section-heading">
+          <div>
+            <h2>Product script suggestion</h2>
+            <p>Seller-only talk tracks built from structured product facts.</p>
+          </div>
+          <button id="load-product-scripts" type="button">Load scripts</button>
+        </div>
+        <div id="script-suggestion-log" class="stack">No script loaded.</div>
       </section>
 
       <section id="liveseller-codex-operator" class="panel" aria-label="Codex operator events" aria-live="polite">

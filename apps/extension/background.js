@@ -6,6 +6,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 const SHOPEE_LIVE_SETUP_URL = "https://live.shopee.sg/pc/setup?from=seller_center";
+const SHOPEE_CREATE_PRODUCT_URL = "https://seller.shopee.sg/portal/product/new";
 
 function waitForTabLoad(tabId) {
   return new Promise((resolve) => {
@@ -56,6 +57,72 @@ async function findOrCreateShopeeLiveTab() {
     return existing;
   }
   return chrome.tabs.create({ url: SHOPEE_LIVE_SETUP_URL, active: true });
+}
+
+async function findOrCreateShopeeProductTab() {
+  const tabs = await chrome.tabs.query({ url: "https://seller.shopee.sg/portal/product/*" });
+  const existing = tabs.find((tab) => tab.url?.includes("/portal/product/new")) || tabs[0];
+  if (existing?.id) {
+    await chrome.tabs.update(existing.id, { active: true });
+    return existing;
+  }
+  const tab = await chrome.tabs.create({ url: SHOPEE_CREATE_PRODUCT_URL, active: true });
+  if (tab.id) {
+    await waitForTabLoad(tab.id);
+  }
+  return tab;
+}
+
+function fillShopeeCreateProductForm(command) {
+  function write(selectors, value) {
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element && ("value" in element)) {
+        element.value = String(value);
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        return selector;
+      }
+    }
+    return undefined;
+  }
+
+  const product = command?.payload?.product;
+  if (!product) {
+    return { ok: false, error: "missing_product_payload" };
+  }
+  const filled = [
+    write(["[name='product_name']", "[name='name']", "input[placeholder*='Product Name' i]", "input[placeholder*='product name' i]"], product.title),
+    write(["textarea[name='description']", "[name='description']", "textarea[placeholder*='description' i]"], product.description),
+    write(["[name='price']", "input[placeholder*='price' i]"], product.price),
+    write(["[name='stock']", "input[placeholder*='stock' i]"], product.stock),
+    write(["[name='sku']", "input[placeholder*='sku' i]"], product.sku)
+  ].filter(Boolean);
+  return {
+    ok: filled.length >= 4,
+    filled,
+    submitted: false,
+    title: document.title,
+    url: location.href
+  };
+}
+
+function fillShopeeReplyComposer(action) {
+  const text = action?.payload?.text;
+  const composer = document.querySelector("[data-liveseller-composer], textarea[placeholder*='message' i], textarea, input[placeholder*='message' i]");
+  if (!text || !composer || !("value" in composer)) {
+    return { ok: false, error: "composer_not_found" };
+  }
+  if (String(composer.value || "").trim()) {
+    return { ok: false, error: "seller_is_typing" };
+  }
+  composer.value = text;
+  composer.dispatchEvent(new Event("input", { bubbles: true }));
+  const send = document.querySelector("[data-liveseller-send], button[type='submit']");
+  if (send instanceof HTMLButtonElement) {
+    send.click();
+  }
+  return { ok: true, publicSend: true, title: document.title, url: location.href };
 }
 
 function inspectOrAdvanceShopeePreview() {
@@ -202,8 +269,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         source: "side-panel"
       }
     });
-    sendResponse({ ok: true, status: "queued_for_shopee_content_script", actionId: message.action.actionId });
-    return false;
+    findOrCreateShopeeLiveTab()
+      .then((tab) => chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: fillShopeeReplyComposer,
+        args: [message.action]
+      }))
+      .then(([result]) => sendResponse({
+        ok: Boolean(result?.result?.ok),
+        status: result?.result?.ok ? "executed_in_authenticated_shopee_tab" : "queued_for_shopee_content_script",
+        actionId: message.action.actionId,
+        evidence: result?.result
+      }))
+      .catch((error) => sendResponse({
+        ok: false,
+        status: "queued_for_shopee_content_script",
+        actionId: message.action.actionId,
+        error: error.message
+      }));
+    return true;
   }
 
   if (message?.type === "liveseller:queue-create-products") {
@@ -215,8 +299,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         source: "side-panel"
       }
     });
-    sendResponse({ ok: commands.length > 0, status: "queued_for_authenticated_tab", commandCount: commands.length });
-    return false;
+    if (commands.length === 0) {
+      sendResponse({ ok: false, status: "no_approved_create_product_commands", commandCount: 0 });
+      return false;
+    }
+    findOrCreateShopeeProductTab()
+      .then((tab) => chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: fillShopeeCreateProductForm,
+        args: [commands[0]]
+      }))
+      .then(([result]) => sendResponse({
+        ok: Boolean(result?.result?.ok),
+        status: result?.result?.ok ? "filled_authenticated_shopee_product_form" : "queued_for_authenticated_tab",
+        commandCount: commands.length,
+        evidence: result?.result
+      }))
+      .catch((error) => sendResponse({
+        ok: false,
+        status: "queued_for_authenticated_tab",
+        commandCount: commands.length,
+        error: error.message
+      }));
+    return true;
   }
 
   return false;
