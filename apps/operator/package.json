@@ -1,0 +1,23 @@
+{
+  "name": "@liveseller/operator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/codexAppServerReview.ts",
+      "import": "./src/codexAppServerReview.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "demo": "tsx src/demo.ts",
+    "test": "vitest run apps/operator/test"
+  },
+  "dependencies": {
+    "@liveseller/contracts": "0.1.0",
+    "@liveseller/prep": "0.1.0",
+    "@liveseller/runtime": "0.1.0",
+    "zod": "^3.25.76"
+  }
+}

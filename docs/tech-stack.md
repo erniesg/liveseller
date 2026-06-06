@@ -16,6 +16,8 @@
   - Deterministic seller-material ingestion into structured product identity, catalog, promo, policy, assets, photo enhancement plans, seller UI policy, and `LiveSessionSpec`.
 - `apps/runtime`
   - Server-owned runtime, policy gates, fake adapters, overlay state, audit events, summaries, local API.
+- `apps/operator`
+  - Codex app-server review orchestration, dynamic tool contracts, and seller operator-console coordination.
 - `apps/overlay`
   - Public livestream overlay.
 - `apps/extension`
@@ -31,6 +33,7 @@
 
 - Backend/runtime owns OpenAI Realtime/session negotiation and model calls.
 - Codex app-server is the preferred integration point for a Codex-native operator console when LiveSeller needs embedded Codex threads, approvals, conversation history, and streamed agent events.
+- `apps/operator` currently implements the app-server JSON-RPC turn contract and LiveSeller dynamic tool handlers; the live transport connection to a spawned `codex app-server` process is the next integration step.
 - Codex app-server does not replace LiveSeller prep contracts: `ProductReviewPlan`, seller review rounds, generation tasks, and Shopee publish commands remain domain payloads in `@liveseller/contracts`.
 - Server-side prep generation can call OpenAI image/text models, but API keys must be supplied through local server secrets or environment configuration, never pasted into chat and never stored in browser clients.
 - Browser clients, overlays, extensions, and content scripts do not store long-lived OpenAI API keys.

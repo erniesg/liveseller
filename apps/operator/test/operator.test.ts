@@ -1,0 +1,113 @@
+import {
+  type ProductReviewDecision,
+  validProductReviewPlan,
+  validSellerFreeFormReviewResponse
+} from "@liveseller/contracts";
+import {
+  LIVESELLER_CODEX_REVIEW_TOOLS,
+  buildCodexAppServerReviewTurn,
+  executeCodexReviewToolCall
+} from "../src/codexAppServerReview";
+
+describe("Codex app-server operator review loop", () => {
+  it("starts a Codex app-server review turn with LiveSeller domain tools", () => {
+    const turn = buildCodexAppServerReviewTurn({
+      cwd: "/repo/liveseller",
+      threadId: "thread-review-001",
+      reviewPlan: validProductReviewPlan,
+      sellerText: "Make the title shorter and generate another image option."
+    });
+
+    expect(turn.threadStart.method).toBe("thread/start");
+    expect(turn.threadStart.params.cwd).toBe("/repo/liveseller");
+    expect(turn.threadStart.params.dynamicTools.map((tool) => tool.name)).toEqual(
+      LIVESELLER_CODEX_REVIEW_TOOLS.map((tool) => tool.name)
+    );
+    expect(turn.turnStart.method).toBe("turn/start");
+    expect(JSON.stringify(turn.turnStart.params.input)).toContain("ProductReviewPlan");
+    expect(JSON.stringify(turn.turnStart.params.input)).toContain("Make the title shorter");
+    expect(JSON.stringify(turn.turnStart.params.input)).toContain("liveseller_record_seller_review_response");
+    expect(JSON.stringify(turn.turnStart.params.input)).toContain("liveseller_run_generation_tasks");
+  });
+
+  it("executes Codex-selected review tools without publishing before approval", async () => {
+    const updated = await executeCodexReviewToolCall(
+      { reviewPlan: validProductReviewPlan, createProductCommands: [] },
+      {
+        tool: "liveseller_record_seller_review_response",
+        arguments: {
+          response: {
+            ...validSellerFreeFormReviewResponse,
+            text: "Make the title shorter and show another image option.",
+            interpretedIntent: "edit_request"
+          }
+        }
+      }
+    );
+
+    expect(updated.reviewPlan.items[0]?.reviewRounds).toHaveLength(2);
+    expect(updated.createProductCommands).toEqual([]);
+    expect(updated.contentItems[0]?.text).toContain("seller_review_required");
+  });
+
+  it("attaches generated image outputs through the app-server generation tool", async () => {
+    const pendingTasks = validProductReviewPlan.generationTasks.filter((task) => task.status === "pending");
+
+    const updated = await executeCodexReviewToolCall(
+      { reviewPlan: validProductReviewPlan, createProductCommands: [] },
+      {
+        tool: "liveseller_run_generation_tasks",
+        arguments: {
+          completedAt: "2026-06-06T04:10:00.000Z",
+          taskOutputs: pendingTasks.map((task) => ({
+            taskId: task.taskId,
+            outputRefs: [`generated/${task.taskId}.png`]
+          }))
+        }
+      }
+    );
+
+    expect(updated.reviewPlan.generationTasks.filter((task) => task.taskType === "image_edit")).toEqual(
+      pendingTasks.map((task) =>
+        expect.objectContaining({
+          taskId: task.taskId,
+          status: "completed",
+          outputRefs: [`generated/${task.taskId}.png`]
+        })
+      )
+    );
+    expect(updated.createProductCommands).toEqual([]);
+  });
+
+  it("emits create-product commands only after Codex records a seller approval decision", async () => {
+    const approvedDecision: ProductReviewDecision = {
+      decisionId: "decision-prod-cooling-tee-approved-by-codex-operator",
+      productId: validProductReviewPlan.items[0]!.productId,
+      status: "approved",
+      decidedBy: "seller",
+      decidedAt: "2026-06-06T04:15:00.000Z",
+      reason: "Seller approved the reviewed draft in the Codex operator console.",
+      citations: validProductReviewPlan.items[0]!.product.evidence
+    };
+
+    const approved = await executeCodexReviewToolCall(
+      { reviewPlan: validProductReviewPlan, createProductCommands: [] },
+      {
+        tool: "liveseller_record_product_review_decision",
+        arguments: { decision: approvedDecision }
+      }
+    );
+    const published = await executeCodexReviewToolCall(approved, {
+      tool: "liveseller_build_create_product_commands",
+      arguments: {}
+    });
+
+    expect(published.reviewPlan.status).toBe("partially_approved");
+    expect(published.createProductCommands).toHaveLength(1);
+    expect(published.createProductCommands[0]).toMatchObject({
+      kind: "create_product",
+      approvalDecisionId: approvedDecision.decisionId,
+      approvalStatus: "approved"
+    });
+  });
+});

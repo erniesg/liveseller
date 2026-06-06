@@ -33,5 +33,6 @@ These project rules adapt the Karpathy-style guidance from `multica-ai/andrej-ka
 - `packages/contracts` owns shared schemas, fixtures, storage contracts, and type exports.
 - `apps/prep` owns seller material file/doc/folder ingestion into structured product identity, catalog, promo, policy, assets, photo enhancement plans, seller UI policy, and `LiveSessionSpec`.
 - `apps/runtime` owns policy, event routing, fake adapters, approvals, audit, captions, translations, and summaries.
+- `apps/operator` owns Codex app-server operator review orchestration, dynamic tool contracts, and seller review console coordination.
 - `apps/overlay` owns public livestream overlay rendering.
 - `apps/extension` owns authenticated seller-tab observation and deterministic command execution.
