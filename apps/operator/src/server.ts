@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import {
   ProductReviewPlanSchema,
@@ -263,7 +264,7 @@ export async function startOperatorHttpServer(port = Number(process.env.LIVESELL
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const started = await startOperatorHttpServer();
   console.log(`LiveSeller operator HTTP server listening on ${started.url}`);
 }
