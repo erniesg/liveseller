@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Helps Shopee sellers review AI-generated product upload drafts from dropped product images.",
   "permissions": [
+    "activeTab",
     "sidePanel",
     "storage"
   ],
@@ -22,6 +23,22 @@
   "action": {
     "default_title": "Shopee Product Upload Assistant"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.shopee.sg/*",
+        "https://*.shopee.com.my/*",
+        "https://*.shopee.co.id/*",
+        "https://*.shopee.ph/*",
+        "https://*.shopee.co.th/*",
+        "https://*.shopee.vn/*"
+      ],
+      "js": [
+        "contentScript.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
   "side_panel": {
     "default_path": "sidepanel.html"
   },

@@ -180,15 +180,72 @@ describe("Shopee extension command safety", () => {
   it("keeps OpenAI keys out of extension manifest", () => {
     const manifest = readFileSync(join(extensionRoot, "manifest.json"), "utf8");
     expect(manifest).not.toMatch(/OPENAI|sk-/i);
+    expect(manifest).toContain("contentScript.js");
   });
 
   it("keeps OpenAI keys out of side-panel files", () => {
     const html = readFileSync(join(extensionRoot, "sidepanel.html"), "utf8");
     const script = readFileSync(join(extensionRoot, "sidepanel.js"), "utf8");
     expect(`${html}\n${script}`).not.toMatch(/OPENAI|sk-/i);
-    expect(html).toContain("Product Upload Assistant");
+    expect(html).toContain("sellerDropManifest.js");
     expect(html).toContain("Drag images here");
+    expect(html).toContain("upload-progress");
+    expect(html).not.toContain("listing-summary");
+    expect(html).not.toContain("review-note");
     expect(script).toContain("zh-hant");
     expect(script).toContain("zh-hans");
+  });
+
+  it("loads seller-drop fixture metadata for listing drafts", () => {
+    const manifest = readFileSync(join(extensionRoot, "sellerDropManifest.js"), "utf8");
+    const script = readFileSync(join(extensionRoot, "sidepanel.js"), "utf8");
+
+    expect(manifest).toContain("buildSellerDropFolderExtraction");
+    expect(manifest).toContain("prod-vintage-gold-grape-leaf-brooch");
+    expect(manifest).toContain("金色新品合集");
+    expect(script).toContain("LiveSellerSellerDropManifest");
+  });
+
+  it("wires approved drafts to the Shopee page content script", () => {
+    const contentScript = readFileSync(join(extensionRoot, "contentScript.js"), "utf8");
+    const sidePanelScript = readFileSync(join(extensionRoot, "sidepanel.js"), "utf8");
+
+    expect(contentScript).toContain("LIVESELLER_FILL_PRODUCT_DRAFT");
+    expect(contentScript).toContain("LIVESELLER_CLEAR_PRODUCT_DRAFT");
+    expect(contentScript).toContain("LIVESELLER_PUBLISH_PRODUCT_DRAFT");
+    expect(contentScript).toContain("fillShopeeProductDraft");
+    expect(contentScript).toContain("clearShopeeProductDraft");
+    expect(contentScript).toContain("publishShopeeProductDraft");
+    expect(contentScript).toContain("uploadProductImages");
+    expect(contentScript).toContain("fillSpecificationFields");
+    expect(contentScript).toContain("fillShippingFields");
+    expect(contentScript).toContain("normalizedPlaceholder.length <= 2");
+    expect(contentScript).toContain("findVisibleByText");
+    expect(contentScript).toContain("brooch");
+    expect(contentScript).toContain("auditBasicInformationRequiredFields");
+    expect(contentScript).toContain("generatedDefaultsFromDraft");
+    expect(contentScript).toContain("fieldLooksEmpty");
+    expect(contentScript).toContain("openCategorySelector");
+    expect(contentScript).toContain("clickLikeUser");
+    expect(contentScript).toContain("findExactTextTarget");
+    expect(contentScript).toContain("categoryStillRequired");
+    expect(contentScript).toContain("No brand");
+    expect(contentScript).toContain("waitForSaveAndPublishEnabled");
+    expect(contentScript).toContain("publishReady");
+    expect(contentScript).toContain("DataTransfer");
+    expect(contentScript).toContain("findFieldAfterLabel");
+    expect(contentScript).not.toContain("dismissOpenModal");
+    expect(sidePanelScript).toContain("readImagePayload");
+    expect(sidePanelScript).toContain("images: await Promise.all");
+    expect(sidePanelScript).toContain("publishProduct");
+    expect(sidePanelScript).toContain("cancelDraft");
+    expect(sidePanelScript).toContain("statusUploading");
+    expect(sidePanelScript).toContain("statusUploadIncomplete");
+    expect(sidePanelScript).toContain("statusMissingCells");
+    expect(sidePanelScript).toContain("keepUploadingIncomplete");
+    expect(sidePanelScript).toContain("attempt < 2");
+    expect(sidePanelScript).toContain("additionalFields");
+    expect(sidePanelScript).toContain("No brand");
+    expect(sidePanelScript).toContain("chrome.tabs.sendMessage");
   });
 });

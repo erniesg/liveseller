@@ -102,6 +102,18 @@ describe("prep catalog brain", () => {
     expect(assets.groups.map((group) => group.imageFiles.length)).toEqual([5, 4, 10]);
   });
 
+  it("discovers the checked-in seller drop fixtures by default", () => {
+    const assets = discoverSellerDropFolderAssets();
+
+    expect(assets.images).toHaveLength(19);
+    expect(assets.folder).toContain("apps/prep/fixtures/seller-drop/vintage-jewelry");
+    expect(assets.groups.map((group) => group.productId)).toEqual([
+      "prod-vintage-gold-grape-leaf-brooch",
+      "prod-vintage-blue-stone-bar-brooch",
+      "prod-vintage-cameo-brooch"
+    ]);
+  });
+
   it("builds a shared seller-drop LiveSessionSpec with guidance and image generation prompts", () => {
     const sellerDropFolder = createSellerDropFolderFixture();
     const result = buildSellerDropFolderExtraction(sellerDropFolder);

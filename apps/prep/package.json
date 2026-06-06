@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "demo": "tsx src/demo.ts",
-    "test": "vitest run apps/prep/test"
+    "test": "vitest run --root ../.. apps/prep/test"
   },
   "dependencies": {
     "@liveseller/contracts": "0.1.0",

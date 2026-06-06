@@ -22,7 +22,7 @@ import {
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_SEED_FOLDER = join(currentDir, "..", "seed");
-export const DEFAULT_SELLER_DROP_FOLDER = "/Users/erniesg/Downloads/liveseller";
+export const DEFAULT_SELLER_DROP_FOLDER = join(currentDir, "..", "fixtures", "seller-drop", "vintage-jewelry");
 
 export type MissingFieldReport = {
   sessionId: string;

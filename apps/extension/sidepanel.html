@@ -40,7 +40,14 @@
           <button id="approve" class="button button-primary" type="button" disabled data-i18n="approveUpload">
             Approve
           </button>
-          <button id="reject" class="button" type="button" disabled data-i18n="rejectDraft">Reject</button>
+          <button id="reject" class="button" type="button" disabled data-i18n="cancelDraft">Cancel</button>
+        </div>
+
+        <div class="upload-progress" id="upload-progress" hidden>
+          <span data-i18n="uploadingStatus">Uploading</span>
+          <div class="progress-track" aria-hidden="true">
+            <div class="progress-bar"></div>
+          </div>
         </div>
 
         <p class="status" id="status" role="status" data-i18n="statusIdle">
@@ -103,24 +110,9 @@
           <span data-i18n="description">Description</span>
           <textarea id="description" rows="5"></textarea>
         </label>
-
-        <div class="listing-summary" id="listing-summary" hidden>
-          <h3 data-i18n="listingCompleteness">Listing draft completed</h3>
-          <ul>
-            <li data-i18n="summaryDetails">Product name, category, price, and stock are filled.</li>
-            <li data-i18n="summaryDescription">Description is generated from the uploaded image.</li>
-            <li data-i18n="summaryReview">Seller can edit any field before approval.</li>
-          </ul>
-        </div>
-
-        <div class="review-note">
-          <strong data-i18n="approvalRequired">Approval required</strong>
-          <p data-i18n="approvalCopy">
-            Nothing is uploaded to Shopee until the seller approves this draft.
-          </p>
-        </div>
       </section>
     </main>
-    <script src="sidepanel.js?v=3"></script>
+    <script src="sellerDropManifest.js?v=1"></script>
+    <script src="sidepanel.js?v=4"></script>
   </body>
 </html>
