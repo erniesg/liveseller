@@ -8,6 +8,7 @@
     "test": "vitest run --root ../.. --config vitest.config.ts apps/extension/test/extension.test.ts"
   },
   "dependencies": {
-    "@liveseller/contracts": "0.1.0"
+    "@liveseller/contracts": "0.1.0",
+    "@openai/agents": "^0.11.6"
   }
 }

@@ -500,6 +500,12 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("/api/operator/review-tools");
     expect(sidePanelScript).toContain("/api/runtime/events");
     expect(sidePanelScript).toContain("/api/runtime/realtime/agent-session");
+    expect(sidePanelScript).toContain("@openai/agents-realtime");
+    expect(sidePanelScript).toContain("RealtimeAgent");
+    expect(sidePanelScript).toContain("RealtimeSession");
+    expect(sidePanelScript).toContain('transport: "webrtc"');
+    expect(sidePanelScript).toContain("show_overlay_background");
+    expect(sidePanelScript).toContain("send_policy_checked_reply");
     expect(sidePanelScript).toContain("/api/live-sessions/");
     expect(sidePanelScript).not.toContain("speechSynthesis");
     expect(sidePanelScript).toContain("publicOverlayUrl");

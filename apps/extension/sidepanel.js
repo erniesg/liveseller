@@ -13,7 +13,8 @@ const state = {
   shopeePreview: undefined,
   overlayPipeStarted: false,
   latestCompositorStatus: undefined,
-  queuedProductCreation: []
+  queuedProductCreation: [],
+  realtimeAgentConnected: false
 };
 
 let intakeImages = [];
@@ -557,13 +558,139 @@ async function startRealtimeAgent() {
       voice: "marin"
     })
   });
+  const sdkResult = await connectOpenAiRealtimeAgent(response);
   writeLog("#realtime-log", {
-    status: "openai_realtime_agent_session_ready",
+    status: sdkResult.connected ? "openai_realtime_agent_connected" : "openai_realtime_agent_session_ready",
     clientSecretPresent: Boolean(response.client_secret || response.value),
     agent: response.agent,
-    note: "Use the returned ephemeral client secret with @openai/agents/realtime in the seller-private UI."
+    sdk: sdkResult,
+    note: "Connected with @openai/agents/realtime using a server-minted ephemeral client secret."
   });
   return response;
+}
+
+function realtimeClientSecret(response) {
+  return response.value ||
+    response.client_secret?.value ||
+    response.client_secret ||
+    response.ephemeralKey ||
+    response.secret;
+}
+
+async function connectOpenAiRealtimeAgent(response) {
+  const secret = realtimeClientSecret(response);
+  if (!secret) {
+    return {
+      connected: false,
+      reason: "missing_ephemeral_client_secret"
+    };
+  }
+
+  try {
+    const {
+      RealtimeAgent,
+      RealtimeSession,
+      tool
+    } = await import("./node_modules/@openai/agents-realtime/dist/bundle/openai-realtime-agents.mjs");
+    const overlayTool = tool({
+      name: "show_overlay_background",
+      description: "Change the public livestream overlay background after the seller asks for a visual change.",
+      parameters: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["solid", "default"] },
+          value: { type: "string" },
+          label: { type: "string" }
+        },
+        required: ["mode", "value"],
+        additionalProperties: false
+      },
+      strict: true,
+      execute: async (input) => fetchJson(`/api/overlay/${encodeURIComponent(liveSessionId())}/background`, {
+        method: "POST",
+        body: JSON.stringify({
+          background: {
+            mode: input.mode,
+            value: input.value,
+            label: input.label || "Realtime agent background"
+          }
+        })
+      })
+    });
+    const replyTool = tool({
+      name: "send_policy_checked_reply",
+      description: "Ask LiveSeller runtime to policy-check a viewer reply before any public send action.",
+      parameters: {
+        type: "object",
+        properties: {
+          viewerId: { type: "string" },
+          viewerName: { type: "string" },
+          text: { type: "string" },
+          language: { type: "string", enum: ["en", "zh", "ms", "ta"] }
+        },
+        required: ["viewerId", "text"],
+        additionalProperties: false
+      },
+      strict: true,
+      execute: async (input) => postRuntimeEvent({
+        eventId: `realtime-agent-viewer-${Date.now()}`,
+        sessionId: liveSessionId(),
+        timestamp: new Date().toISOString(),
+        source: "viewer",
+        type: "viewer_chat",
+        payload: {
+          viewerId: input.viewerId,
+          viewerName: input.viewerName || "Shopee Viewer",
+          text: input.text,
+          language: input.language || "en"
+        }
+      })
+    });
+    const agent = new RealtimeAgent({
+      name: response.agent?.name || "LiveSeller Realtime Copilot",
+      voice: "marin",
+      instructions: [
+        "You are the LiveSeller seller-private realtime copilot.",
+        "Listen to the seller's speech, prompt concise product talk tracks, and translate requested Chinese host speech into English audio.",
+        "Use tools for overlay background changes and policy-checked viewer replies. Do not invent discounts, stock, refund commitments, or legal claims."
+      ].join(" "),
+      tools: [overlayTool, replyTool]
+    });
+    const session = new RealtimeSession(agent, {
+      transport: "webrtc",
+      model: response.session?.model || "gpt-realtime",
+      config: {
+        audio: response.session?.audio
+      }
+    });
+    session.on("history_added", () => {
+      state.realtimeAgentConnected = true;
+    });
+    session.on("error", (event) => {
+      writeLog("#realtime-log", {
+        status: "openai_realtime_agent_error",
+        message: event?.message || String(event)
+      });
+    });
+    await session.connect({ apiKey: secret });
+    globalThis.livesellerRealtimeAgentSession?.close?.();
+    globalThis.livesellerRealtimeAgentSession = session;
+    state.realtimeAgentConnected = true;
+    return {
+      connected: true,
+      sdk: "@openai/agents/realtime",
+      transport: "webrtc",
+      model: response.session?.model || "gpt-realtime",
+      tools: ["show_overlay_background", "send_policy_checked_reply"]
+    };
+  } catch (error) {
+    state.realtimeAgentConnected = false;
+    return {
+      connected: false,
+      sdk: "@openai/agents/realtime",
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 async function loadProductScripts() {
