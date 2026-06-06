@@ -34,6 +34,46 @@ body {
     linear-gradient(135deg, rgba(20, 184, 166, 0.2), rgba(248, 113, 113, 0.1));
 }
 
+.runtime-status {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 7px;
+  max-width: min(260px, calc(100% - 24px));
+  padding: 7px 10px;
+  border: 1px solid rgba(248, 250, 252, 0.22);
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.58);
+  color: #f8fafc;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+}
+
+.runtime-status span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.runtime-status-live span {
+  background: #22c55e;
+}
+
+.runtime-status-connecting span {
+  background: #f59e0b;
+}
+
+.runtime-status-error span {
+  background: #fb7185;
+}
+
 .top-band {
   display: grid;
   grid-template-columns: minmax(260px, 420px) minmax(220px, 360px);
