@@ -4,7 +4,7 @@
 
 All lane boundaries use the Zod schemas from `@liveseller/contracts`.
 
-- Prep emits `LiveSessionSpec`, `ProductRecord[]`, `PromoRecord[]`, `PolicyPack`, citations, assets, and missing-field report.
+- Prep emits `LiveSessionSpec`, `ProductRecord[]`, `PromoRecord[]`, `PolicyPack`, citations, assets, missing-field report, seller guidance, and image generation plans.
 - Runtime consumes `RuntimeEvent` and emits `LiveAction[]`, `ToolResult[]`, `AuditEvent[]`, and `OverlayState`.
 - Extension consumes approved `LiveAction` values and emits `ToolResult`.
 - Overlay consumes `OverlayState` or overlay-safe `LiveAction` updates.
@@ -29,3 +29,14 @@ Implemented in `apps/runtime/src/server.ts`.
 - The extension must not overwrite seller typing.
 - Risky actions are seller alerts, drafts, or approvals only.
 - Overlay promo banners must show `Shopee-backed` or `Overlay-only`.
+
+## Prep Drop-Folder Interface
+
+Implemented in `apps/prep/src/index.ts`.
+
+- `discoverSellerDropFolderAssets(folder)`
+  - Reads seller-supplied image files from a local folder.
+  - Groups the current Downloads fixture into shared vintage-jewelry product fixtures.
+- `buildSellerDropFolderExtraction(folder)`
+  - Returns a valid `LiveSessionSpec`, structured product and promo records, seller guidance, and image generation prompts.
+  - Image generation prompts target server-side `gpt-image-2` use; browser clients and extensions must not hold OpenAI API keys.

@@ -1,13 +1,48 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   LiveSessionSpecSchema,
   ProductRecordSchema,
   PromoRecordSchema
 } from "@liveseller/contracts";
 import {
+  buildSellerDropFolderExtraction,
   buildMissingFieldReport,
+  discoverSellerDropFolderAssets,
   buildSeedExtraction,
   readSeedDocuments
 } from "../src/index";
+
+const sellerDropFileNames = [
+  "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰.jpg",
+  "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰 (1).jpg",
+  "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰 (2).jpg",
+  "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰 (3).jpg",
+  "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰 (4).jpg",
+  "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风.jpg",
+  "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (1).jpg",
+  "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (2).jpg",
+  "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (3).jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享.jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (1).jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (2).jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (3).jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (4).jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (5).jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (6).jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (7).jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (8).jpg",
+  "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (9).jpg"
+];
+
+function createSellerDropFolderFixture() {
+  const folder = mkdtempSync(join(tmpdir(), "liveseller-drop-"));
+  for (const fileName of sellerDropFileNames) {
+    writeFileSync(join(folder, fileName), "fixture image bytes");
+  }
+  return folder;
+}
 
 describe("prep catalog brain", () => {
   it("reads the seed folder used as the local upload fixture", () => {
@@ -52,5 +87,34 @@ describe("prep catalog brain", () => {
     expect(report.missingByProduct.every((row) => row.missingFields.includes("shopeeProductId"))).toBe(
       true
     );
+  });
+
+  it("discovers product images from the seller drop folder", () => {
+    const sellerDropFolder = createSellerDropFolderFixture();
+    const assets = discoverSellerDropFolderAssets(sellerDropFolder);
+
+    expect(assets.images).toHaveLength(19);
+    expect(assets.groups.map((group) => group.productId)).toEqual([
+      "prod-vintage-gold-grape-leaf-brooch",
+      "prod-vintage-blue-stone-bar-brooch",
+      "prod-vintage-cameo-brooch"
+    ]);
+    expect(assets.groups.map((group) => group.imageFiles.length)).toEqual([5, 4, 10]);
+  });
+
+  it("builds a shared seller-drop LiveSessionSpec with guidance and image generation prompts", () => {
+    const sellerDropFolder = createSellerDropFolderFixture();
+    const result = buildSellerDropFolderExtraction(sellerDropFolder);
+
+    expect(result.products).toHaveLength(3);
+    expect(result.assets.filter((asset) => asset.kind === "product_image")).toHaveLength(19);
+    expect(result.sellerGuidance).toHaveLength(3);
+    expect(result.imageGenerationPlan).toHaveLength(3);
+    expect(result.imageGenerationPlan.every((plan) => plan.model === "gpt-image-2")).toBe(true);
+    expect(result.imageGenerationPlan[0]?.prompts.some((prompt) => prompt.includes("Shopee-ready square cover"))).toBe(
+      true
+    );
+    expect(result.sellerGuidance[0]?.talkTrack).toContain("grape");
+    expect(() => LiveSessionSpecSchema.parse(result.liveSessionSpec)).not.toThrow();
   });
 });

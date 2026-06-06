@@ -20,7 +20,10 @@ import {
   validPromo,
   validRuntimeEvents,
   validSessionMemory,
-  validViewerMemory
+  validViewerMemory,
+  vintageJewelryLiveSessionSpec,
+  vintageJewelryProducts,
+  vintageJewelrySessionMemory
 } from "@liveseller/contracts";
 
 describe("contract freeze", () => {
@@ -68,5 +71,26 @@ describe("contract freeze", () => {
     expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS approvals");
     expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS commands");
     expect(AUDIT_JSONL_CONTRACT.filePattern).toBe("audit/{sessionId}.jsonl");
+  });
+
+  it("shares the vintage jewelry seller-drop fixtures across lanes", () => {
+    expect(vintageJewelryProducts).toHaveLength(3);
+    expect(() => vintageJewelryProducts.forEach((product) => ProductRecordSchema.parse(product))).not.toThrow();
+    expect(() => LiveSessionSpecSchema.parse(vintageJewelryLiveSessionSpec)).not.toThrow();
+    expect(() => SessionMemorySchema.parse(vintageJewelrySessionMemory)).not.toThrow();
+    expect(vintageJewelryLiveSessionSpec.products.map((product) => product.id)).toEqual(
+      vintageJewelryProducts.map((product) => product.id)
+    );
+    expect(vintageJewelryProducts.every((product) => product.media.images.length > 0)).toBe(true);
+    expect(vintageJewelrySessionMemory.recommendations.some((note) => note.includes("cameo"))).toBe(true);
+  });
+
+  it("keeps shared fixture asset locators portable across machines", () => {
+    const imageLocators = vintageJewelryProducts.flatMap((product) =>
+      product.media.images.flatMap((image) => image.citations.map((citation) => citation.locator))
+    );
+
+    expect(imageLocators.every((locator) => locator.startsWith("apps/overlay/public/assets/"))).toBe(true);
+    expect(imageLocators.every((locator) => !locator.includes("/Users/"))).toBe(true);
   });
 });

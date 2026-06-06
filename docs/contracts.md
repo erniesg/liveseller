@@ -31,3 +31,4 @@ The contract source of truth is `packages/contracts/src/schemas.ts`.
 - Valid fixtures live in `packages/contracts/src/fixtures.ts`.
 - Bad fixtures must cover safety-relevant failure modes.
 - Lane tests should use shared fixtures unless a lane-specific fixture is necessary.
+- Seller drop-folder fixtures for the vintage jewelry demo are exported from `packages/contracts/src/fixtures.ts` as shared products, session spec, promo, policy pack, and session memory.
