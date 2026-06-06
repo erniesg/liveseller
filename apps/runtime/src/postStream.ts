@@ -1,4 +1,5 @@
-import type { AuditEvent, LiveSessionSpec } from "@liveseller/contracts";
+import type { AuditEvent, LiveSessionSpec, SessionMemory } from "@liveseller/contracts";
+import { buildSessionMemoryFromAudit } from "./memory";
 
 export type PostStreamSummary = {
   sessionId: string;
@@ -7,6 +8,7 @@ export type PostStreamSummary = {
   drafts: number;
   escalations: number;
   approvalsRequested: number;
+  sessionMemory: SessionMemory;
   recommendations: string[];
 };
 
@@ -16,10 +18,10 @@ export function summarizeStream(session: LiveSessionSpec, auditEvents: AuditEven
   const drafts = actions.filter((action) => action.type === "draft_reply").length;
   const escalations = actions.filter((action) => action.type === "escalate").length;
   const approvalsRequested = actions.filter((action) => action.type === "request_approval").length;
-  const topProduct = session.products[0];
-  if (!topProduct) {
+  if (!session.products[0]) {
     throw new Error("LiveSessionSpec must include at least one product");
   }
+  const sessionMemory = buildSessionMemoryFromAudit(session, auditEvents);
 
   return {
     sessionId: session.sessionId,
@@ -28,10 +30,7 @@ export function summarizeStream(session: LiveSessionSpec, auditEvents: AuditEven
     drafts,
     escalations,
     approvalsRequested,
-    recommendations: [
-      `Start the next stream with ${topProduct.title}; it has clear structured price and stock facts.`,
-      "Verify overlay-only promos in Shopee Seller Centre before promising them publicly.",
-      "Keep refund, fake-product, legal, and discount-negotiation replies behind seller approval."
-    ]
+    sessionMemory,
+    recommendations: sessionMemory.recommendations
   };
 }
