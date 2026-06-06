@@ -3,104 +3,115 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LiveSeller Controls</title>
+    <title>Shopee Product Upload Assistant</title>
     <link rel="stylesheet" href="sidepanel.css" />
   </head>
   <body>
     <main class="shell">
-      <header class="hero">
-        <p class="eyebrow">LiveSeller Lane 3</p>
-        <h1>Vintage Jewelry Live Showcase</h1>
-        <span id="connection" class="status status-offline">Runtime disconnected</span>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" data-i18n="eyebrow">Shopee seller tool</p>
+          <h1 data-i18n="title">Product Upload Assistant</h1>
+        </div>
+        <div class="language-switcher" aria-label="Language">
+          <button class="language-option active" type="button" data-language="en">EN</button>
+          <button class="language-option" type="button" data-language="zh-hant">繁</button>
+          <button class="language-option" type="button" data-language="zh-hans">简</button>
+        </div>
       </header>
 
-      <section class="notice" aria-label="Real Shopee selector status">
-        <strong>REAL_SHOPEE_UI_AUDIT_REQUIRED</strong>
-        <span>No public sends until real seller-tab selectors are proven.</span>
-      </section>
-
-      <section class="panel" aria-label="Current session">
-        <div class="section-title">
-          <h2>Session</h2>
-          <span>shop-sg-demo</span>
+      <section class="steps" aria-label="Upload progress">
+        <div class="step active">
+          <span>1</span>
+          <strong data-i18n="stepImages">Images</strong>
         </div>
-        <dl class="session-grid">
-          <div>
-            <dt>Session ID</dt>
-            <dd>live-vintage-jewelry-001</dd>
-          </div>
-          <div>
-            <dt>Products</dt>
-            <dd>3 one-of-one brooches</dd>
-          </div>
-          <div>
-            <dt>Approval</dt>
-            <dd>Hybrid</dd>
-          </div>
-          <div>
-            <dt>Promo</dt>
-            <dd>SGD 8 off, overlay-only</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section class="panel" aria-label="Captured viewer message">
-        <div class="section-title">
-          <h2>Captured Message</h2>
-          <span>not sent</span>
+        <div class="step" id="step-ai">
+          <span>2</span>
+          <strong data-i18n="stepAi">AI draft</strong>
         </div>
-        <article class="message-card">
-          <strong>Real Buyer</strong>
-          <p>Is the cameo brooch real gold?</p>
-          <span>Blocked from runtime while disconnected</span>
-        </article>
+        <div class="step" id="step-approval">
+          <span>3</span>
+          <strong data-i18n="stepApproval">Approval</strong>
+        </div>
       </section>
 
-      <section class="panel" aria-label="Pending seller actions">
-        <div class="section-title">
-          <h2>Pending Actions</h2>
-          <span>policy gated</span>
+      <section class="approval-panel" aria-label="Seller approval actions">
+        <div class="action-bar">
+          <button id="approve" class="button button-primary" type="button" disabled data-i18n="approveUpload">
+            Approve
+          </button>
+          <button id="reject" class="button" type="button" disabled data-i18n="rejectDraft">Reject</button>
         </div>
-        <article class="action-card safe">
-          <strong>Pending safe reply</strong>
-          <p>Public-send eligible only when low-risk, no approval, and composer is empty.</p>
-        </article>
-        <article class="action-card private">
-          <strong>Seller-only escalation</strong>
-          <p>Authenticity, refund, legal, fraud, and unauthorized discount cases never public-send.</p>
-        </article>
+
+        <p class="status" id="status" role="status" data-i18n="statusIdle">
+          Add product images to begin.
+        </p>
       </section>
 
-      <section class="panel" aria-label="Composer guard">
+      <section class="card upload-card" aria-label="Product image upload">
         <div class="section-title">
-          <h2>Composer Guard</h2>
-          <span>active</span>
-        </div>
-        <p class="guard-copy">Drafting is skipped when the seller is typing or the composer already has text.</p>
-      </section>
-
-      <section class="panel" aria-label="Last tool result">
-        <div class="section-title">
-          <h2>Last Tool Result</h2>
-          <span>skipped</span>
-        </div>
-        <dl class="result-grid">
           <div>
-            <dt>Adapter</dt>
-            <dd>shopee-content-script</dd>
+            <h2 data-i18n="uploadTitle">Drop product images</h2>
+            <p data-i18n="uploadHint">Add clear product photos. AI will prepare listing details for review.</p>
           </div>
-          <div>
-            <dt>Evidence</dt>
-            <dd>side-panel-state</dd>
-          </div>
-        </dl>
+          <span class="tag" id="image-count" data-i18n="emptyState">No images</span>
+        </div>
+
+        <div class="preview-grid" id="preview-grid" aria-label="Selected product images"></div>
+
+        <label class="dropzone" id="dropzone" for="file-input">
+          <input id="file-input" type="file" accept="image/*" multiple />
+          <span class="drop-icon" aria-hidden="true">+</span>
+          <strong data-i18n="dropCta">Drag images here</strong>
+          <small data-i18n="dropSubcopy">or click to choose files</small>
+        </label>
       </section>
 
-      <section class="approval-row" aria-label="Seller approvals">
-        <button id="approve" type="button">Approve Draft</button>
-        <button id="reject" type="button">Reject</button>
+      <section class="card ai-card" aria-label="AI listing recommendation">
+        <div class="section-title">
+          <div>
+            <h2 data-i18n="aiTitle">AI listing draft</h2>
+            <p data-i18n="aiHint">Generated locally as a front-end demo. Seller approval is required.</p>
+          </div>
+          <span class="tag tag-warning" id="ai-status" data-i18n="waitingForImages">Waiting</span>
+        </div>
+
+        <div class="draft-grid">
+          <label>
+            <span data-i18n="productName">Product name</span>
+            <input id="product-name" type="text" />
+          </label>
+          <label>
+            <span data-i18n="category">Category</span>
+            <select id="category">
+              <option data-i18n="categoryFashion">Fashion Accessories</option>
+              <option data-i18n="categoryBeauty">Beauty</option>
+              <option data-i18n="categoryHome">Home & Living</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="price">Suggested price</span>
+            <input id="price" type="text" />
+          </label>
+          <label>
+            <span data-i18n="stock">Stock</span>
+            <input id="stock" type="number" min="1" value="20" />
+          </label>
+        </div>
+
+        <label class="description-field">
+          <span data-i18n="description">Description</span>
+          <textarea id="description" rows="5"></textarea>
+        </label>
+
+        <div class="review-note">
+          <strong data-i18n="approvalRequired">Approval required</strong>
+          <p data-i18n="approvalCopy">
+            Nothing is uploaded to Shopee until the seller approves this draft.
+          </p>
+        </div>
       </section>
     </main>
-    <script src="sidepanel.js"></script>
+    <script src="sidepanel.js?v=3"></script>
   </body>
 </html>

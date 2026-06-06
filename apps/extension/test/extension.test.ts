@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { validLiveAction } from "@liveseller/contracts";
 import { executeSellerCommand } from "../src/commandExecutor";
 import { extractViewerMessage, toViewerChatEvent } from "../src/contentScript";
 import { createSidePanelSnapshot, describeActionForSeller } from "../src/sidePanelState";
+
+const extensionRoot = dirname(fileURLToPath(import.meta.url)).replace(/\/test$/, "");
 
 describe("Shopee extension command safety", () => {
   it("does not overwrite seller typing when drafting", () => {
@@ -175,15 +178,17 @@ describe("Shopee extension command safety", () => {
   });
 
   it("keeps OpenAI keys out of extension manifest", () => {
-    const manifest = readFileSync(join(process.cwd(), "apps/extension/manifest.json"), "utf8");
+    const manifest = readFileSync(join(extensionRoot, "manifest.json"), "utf8");
     expect(manifest).not.toMatch(/OPENAI|sk-/i);
   });
 
   it("keeps OpenAI keys out of side-panel files", () => {
-    const html = readFileSync(join(process.cwd(), "apps/extension/sidepanel.html"), "utf8");
-    const script = readFileSync(join(process.cwd(), "apps/extension/sidepanel.js"), "utf8");
+    const html = readFileSync(join(extensionRoot, "sidepanel.html"), "utf8");
+    const script = readFileSync(join(extensionRoot, "sidepanel.js"), "utf8");
     expect(`${html}\n${script}`).not.toMatch(/OPENAI|sk-/i);
-    expect(html).toContain("Vintage Jewelry Live Showcase");
-    expect(html).toContain("REAL_SHOPEE_UI_AUDIT_REQUIRED");
+    expect(html).toContain("Product Upload Assistant");
+    expect(html).toContain("Drag images here");
+    expect(script).toContain("zh-hant");
+    expect(script).toContain("zh-hans");
   });
 });

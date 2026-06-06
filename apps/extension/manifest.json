@@ -1,11 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "LiveSeller Shopee Copilot",
+  "name": "Shopee Product Upload Assistant",
   "version": "0.1.0",
-  "description": "Observes an authenticated seller tab and executes approved LiveSeller commands.",
+  "description": "Helps Shopee sellers review AI-generated product upload drafts from dropped product images.",
   "permissions": [
-    "activeTab",
-    "scripting",
+    "sidePanel",
     "storage"
   ],
   "host_permissions": [
@@ -17,25 +16,12 @@
     "https://*.shopee.vn/*"
   ],
   "background": {
-    "service_worker": "dist/background.js",
+    "service_worker": "background.js",
     "type": "module"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://*.shopee.sg/*",
-        "https://*.shopee.com.my/*",
-        "https://*.shopee.co.id/*",
-        "https://*.shopee.ph/*",
-        "https://*.shopee.co.th/*",
-        "https://*.shopee.vn/*"
-      ],
-      "js": [
-        "dist/contentScript.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
+  "action": {
+    "default_title": "Shopee Product Upload Assistant"
+  },
   "side_panel": {
     "default_path": "sidepanel.html"
   },
