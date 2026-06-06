@@ -9,6 +9,7 @@ import {
   executeCodexReviewToolCall,
   runCodexAppServerReviewSession
 } from "../src/codexAppServerReview";
+import { createJsonLineCodexAppServerTransport } from "../src/codexAppServerTransport";
 
 describe("Codex app-server operator review loop", () => {
   it("starts a Codex app-server review turn with LiveSeller domain tools", () => {
@@ -177,5 +178,53 @@ describe("Codex app-server operator review loop", () => {
       "tool_result_sent",
       "turn_completed"
     ]);
+  });
+
+  it("streams app-server JSON-RPC messages over stdio-compatible newline JSON", async () => {
+    const { PassThrough } = await import("node:stream");
+    const inbound = new PassThrough();
+    const outbound = new PassThrough();
+    const writes: string[] = [];
+    outbound.on("data", (chunk) => writes.push(String(chunk)));
+
+    const transport = createJsonLineCodexAppServerTransport({
+      stdin: outbound,
+      stdout: inbound
+    });
+
+    await transport.send({
+      id: 7,
+      method: "thread/start",
+      params: {
+        cwd: "/repo/liveseller"
+      }
+    });
+
+    const events = transport.events()[Symbol.asyncIterator]();
+    inbound.write(JSON.stringify({
+      method: "item/tool/call",
+      params: {
+        callId: "call-stdio-001",
+        tool: "liveseller_build_create_product_commands",
+        arguments: {}
+      }
+    }) + "\n");
+
+    await expect(events.next()).resolves.toEqual({
+      done: false,
+      value: expect.objectContaining({
+        method: "item/tool/call",
+        params: expect.objectContaining({
+          callId: "call-stdio-001"
+        })
+      })
+    });
+    expect(writes.join("")).toBe('{"id":7,"method":"thread/start","params":{"cwd":"/repo/liveseller"}}\n');
+
+    inbound.end();
+    await expect(events.next()).resolves.toEqual({
+      done: true,
+      value: undefined
+    });
   });
 });

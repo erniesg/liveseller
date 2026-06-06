@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/codexAppServerReview.ts",
       "import": "./src/codexAppServerReview.ts"
+    },
+    "./transport": {
+      "types": "./src/codexAppServerTransport.ts",
+      "import": "./src/codexAppServerTransport.ts"
     }
   },
   "scripts": {
