@@ -515,6 +515,9 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain('id="product-event-count"');
     expect(sidePanel).toContain('id="approve-all-sticky"');
     expect(sidePanel).toContain("Approve all and create products");
+    expect(sidePanelScript).toContain("Retry creating approved products");
+    expect(sidePanelScript).toContain("Shopee creation retry started");
+    expect(sidePanelScript).toContain("Create command rebuild started");
     expect(sidePanel).not.toContain('id="approve-all"');
     expect(sidePanel).toContain("More options");
     expect(sidePanel).toContain("Load cached plan");
@@ -626,6 +629,12 @@ describe("Shopee extension command safety", () => {
     expect(background).toContain("prepareShopeeTestPreview");
     expect(background).toContain("liveseller:prepare-shopee-test-preview");
     expect(background).toContain("liveseller:confirm-product-publish");
+    expect(background).toContain("fillShopeeProductDraft");
+    expect(background).toContain("clickShopeeProductSection");
+    expect(background).toContain("skipImages: true");
+    expect(background).toContain("already_uploaded_before_submit");
+    expect(background).toContain("shipping_submit");
+    expect(background).toContain("enableFirstShippingOption");
     expect(background).toContain("liveseller:confirm-go-live");
     expect(contentScript).toContain("data-viewer-id");
     expect(`${sidePanel}\n${sidePanelScript}\n${background}\n${contentScript}`).not.toMatch(/OPENAI_API_KEY|sk-/i);

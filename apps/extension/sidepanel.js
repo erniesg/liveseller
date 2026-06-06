@@ -338,8 +338,21 @@ function publishableItems() {
   );
 }
 
+function pendingReviewItems() {
+  return currentItems().filter((item) =>
+    item.decision.status !== "approved" && item.decision.status !== "edited" && item.decision.status !== "rejected"
+  );
+}
+
 function publishableProducts() {
   return publishableItems().map((item) => item.decision.editedProduct || item.product);
+}
+
+function approvedCreateProductCommands() {
+  return state.createProductCommands.filter((command) =>
+    command.kind === "create_product" &&
+    (command.approvalStatus === "approved" || command.approvalStatus === "edited")
+  );
 }
 
 function liveLineupProducts() {
@@ -625,15 +638,17 @@ async function registerApprovedLiveSession() {
 
 function renderReviewPlan() {
   const items = currentItems();
-  const pendingItems = items.filter((item) =>
-    item.decision.status !== "approved" && item.decision.status !== "edited" && item.decision.status !== "rejected"
-  );
+  const pendingItems = pendingReviewItems();
+  const approvedCommands = approvedCreateProductCommands();
   $("#liveseller-prep-review").toggleAttribute("hidden", items.length === 0);
   $("#review-status").textContent = state.reviewPlan
     ? `${state.reviewPlan.status} - ${items.length} products`
     : "No review plan loaded.";
-  const canApproveAll = Boolean(state.reviewPlan && pendingItems.length > 0);
+  const canApproveAll = Boolean(state.reviewPlan && (pendingItems.length > 0 || approvedCommands.length > 0));
   $("#approve-all-sticky").disabled = !canApproveAll;
+  $("#approve-all-sticky").textContent = pendingItems.length > 0
+    ? "Approve all and create products"
+    : "Retry creating approved products";
   $("#approve-all-sticky-bar").toggleAttribute("hidden", !canApproveAll);
   updateLaunchChecklist();
   const root = $("#review-items");
@@ -1148,11 +1163,38 @@ async function submitDecision(card, item, status) {
 }
 
 async function approveAll() {
-  const pending = currentItems().filter((item) =>
-    item.decision.status !== "approved" && item.decision.status !== "edited" && item.decision.status !== "rejected"
-  );
+  const pending = pendingReviewItems();
   if (pending.length === 0) {
-    appendProductEvent("Approve all skipped", "No pending products to approve.");
+    const approvedCommands = approvedCreateProductCommands();
+    if (approvedCommands.length > 0) {
+      appendProductEvent("Shopee creation retry started", `${approvedCommands.length} approved product command(s) will be retried.`);
+      await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: true });
+      return;
+    }
+    if (state.reviewPlanSource === "operator" && state.reviewPlan && publishableItems().length > 0) {
+      appendProductEvent("Create command rebuild started", "Approved products exist but no create commands were queued.");
+      const response = await fetchOperatorJson("/api/operator/review-tools", {
+        method: "POST",
+        body: JSON.stringify({
+          reviewPlan: state.reviewPlan,
+          createProductCommands: state.createProductCommands,
+          calls: [{
+            tool: "liveseller_build_create_product_commands",
+            arguments: {}
+          }]
+        })
+      });
+      state.reviewPlan = response.reviewPlan;
+      state.reviewPlanSource = "operator";
+      state.createProductCommands = response.createProductCommands || [];
+      state.startLivestreamCommands = response.startLivestreamCommands || [];
+      renderReviewPlan();
+      renderCommands();
+      appendProductEvent("Create commands rebuilt", `${state.createProductCommands.length} Shopee create command(s) ready.`, "success");
+      await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: true });
+      return;
+    }
+    appendProductEvent("Approve all skipped", "No pending or approved products are ready to create.");
     return;
   }
   appendProductEvent("Approve all started", `${pending.length} product(s) sent to Codex operator.`);
@@ -1867,6 +1909,7 @@ async function confirmShopeeProductPublish(options = {}) {
     state.queuedProductCreation = [];
   }
   updateLaunchChecklist();
+  renderReviewPlan();
   renderCommands();
   writeLog("#product-creation-log", {
     status: response?.ok ? "submitted_authenticated_shopee_product_form" : "product_publish_not_submitted",

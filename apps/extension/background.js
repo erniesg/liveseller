@@ -90,6 +90,31 @@ function clickButtonByText(labels) {
   return true;
 }
 
+function clickShopeeProductSection(labels) {
+  function visible(element) {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  }
+  const normalized = labels.map((label) => String(label).replace(/\s+/g, " ").trim().toLowerCase());
+  const target = Array.from(document.querySelectorAll("button, a, div, span")).find((candidate) => {
+    const text = String(candidate.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    return visible(candidate) &&
+      text.length > 0 &&
+      text.length <= 80 &&
+      normalized.some((label) => text === label || text.includes(label));
+  });
+  if (!target) {
+    return { ok: false, section: labels[0] };
+  }
+  target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, view: window }));
+  target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+  target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+  target.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, cancelable: true, view: window }));
+  target.click();
+  return { ok: true, section: labels[0], title: document.title, url: location.href };
+}
+
 function fillShopeeCreateProductForm(command, options = {}) {
   function setNativeValue(element, value) {
     const prototype = Object.getPrototypeOf(element);
@@ -149,6 +174,48 @@ function fillShopeeCreateProductForm(command, options = {}) {
     return fieldName;
   }
 
+  function writeVisibleByPlaceholder(placeholders, value, fieldName) {
+    const normalized = placeholders.map((placeholder) => String(placeholder).toLowerCase());
+    const target = Array.from(document.querySelectorAll("input")).find((element) => {
+      const placeholder = String(element.getAttribute("placeholder") || "").toLowerCase();
+      return visible(element) &&
+        !element.disabled &&
+        element.getAttribute("aria-disabled") !== "true" &&
+        normalized.some((label) => placeholder.includes(label));
+    });
+    if (!target) {
+      return undefined;
+    }
+    setNativeValue(target, value);
+    return fieldName;
+  }
+
+  function enableFirstShippingOption() {
+    const shippingSection = findSectionByText(["shipping fee", "doorstep delivery", "standard"]);
+    const candidates = [
+      ...(shippingSection ? Array.from(shippingSection.querySelectorAll("input[type='checkbox'], button, [role='switch'], .shopee-switch, .switch")) : []),
+      ...Array.from(document.querySelectorAll("input[type='checkbox'], button, [role='switch']"))
+    ];
+    const target = candidates.find((element) => {
+      const text = String(element.textContent || element.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const checked = element.checked === true || element.getAttribute("aria-checked") === "true";
+      return visible(element) &&
+        !element.disabled &&
+        element.getAttribute("aria-disabled") !== "true" &&
+        !checked &&
+        !text.includes("save") &&
+        !text.includes("cancel");
+    });
+    if (!target) {
+      return undefined;
+    }
+    target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, view: window }));
+    target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    target.click();
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+    return "shippingOption";
+  }
+
   function fileFromDataUrl(image, index) {
     const [header, base64] = String(image.uri || "").split(",");
     if (!header?.startsWith("data:") || !base64) {
@@ -167,7 +234,7 @@ function fillShopeeCreateProductForm(command, options = {}) {
     const files = (product.media?.images || [])
       .map(fileFromDataUrl)
       .filter(Boolean)
-      .slice(0, 9);
+      .slice(0, 1);
     if (files.length === 0) {
       return { selector: undefined, count: 0 };
     }
@@ -189,7 +256,9 @@ function fillShopeeCreateProductForm(command, options = {}) {
   if (!product) {
     return { ok: false, error: "missing_product_payload" };
   }
-  const uploadedImages = uploadImages(product);
+  const uploadedImages = options.submit === true || options.skipImages === true
+    ? { selector: undefined, count: 0, skipped: "already_uploaded_before_submit" }
+    : uploadImages(product);
   const filled = [
     write([
       "[name='product_name']",
@@ -206,7 +275,13 @@ function fillShopeeCreateProductForm(command, options = {}) {
       || writeNearLabel(["price"], product.price, "price", "input"),
     write(["[name='stock']", "input[placeholder*='stock' i]"], product.stock)
       || writeNearLabel(["stock"], product.stock, "stock", "input"),
-    write(["[name='sku']", "input[placeholder*='sku' i]"], product.sku)
+    write(["[name='sku']", "input[placeholder*='sku' i]"], product.sku),
+    write(["[name='weight']", "input[placeholder*='weight' i]"], product.shipping?.weightKg || 0.2)
+      || writeVisibleByPlaceholder(["weight"], product.shipping?.weightKg || 0.2, "weight"),
+    writeVisibleByPlaceholder(["w (integer)", "width"], product.shipping?.widthCm || 10, "parcelWidth"),
+    writeVisibleByPlaceholder(["l", "length"], product.shipping?.lengthCm || 10, "parcelLength"),
+    writeVisibleByPlaceholder(["h (integer)", "height"], product.shipping?.heightCm || 5, "parcelHeight"),
+    enableFirstShippingOption()
   ].filter(Boolean);
   return {
     ok: filled.length >= 3 || uploadedImages.count > 0,
@@ -352,6 +427,54 @@ async function prepareShopeeTestPreview() {
   };
 }
 
+async function fillShopeeProductDraft(tab, command, options = {}) {
+  const steps = [];
+  let [result] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: fillShopeeCreateProductForm,
+    args: [command, { submit: false }]
+  });
+  steps.push({ step: "basic", result: result?.result });
+
+  [result] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: clickShopeeProductSection,
+    args: [["Sales Information", "Sales"]]
+  });
+  steps.push({ step: "sales_tab", result: result?.result });
+  await delay(500);
+  [result] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: fillShopeeCreateProductForm,
+    args: [command, { submit: false, skipImages: true }]
+  });
+  steps.push({ step: "sales", result: result?.result });
+
+  [result] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: clickShopeeProductSection,
+    args: [["Shipping"]]
+  });
+  steps.push({ step: "shipping_tab", result: result?.result });
+  await delay(500);
+  [result] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: fillShopeeCreateProductForm,
+    args: [command, { submit: options.submit === true, skipImages: true }]
+  });
+  steps.push({ step: options.submit === true ? "shipping_submit" : "shipping", result: result?.result });
+
+  const last = steps.at(-1)?.result || {};
+  return {
+    ...last,
+    ok: steps.some((step) => step.result?.ok),
+    submitted: Boolean(last.submitted),
+    filled: [...new Set(steps.flatMap((step) => step.result?.filled || []))],
+    uploadedImages: steps.find((step) => step.result?.uploadedImages?.count > 0)?.result?.uploadedImages || last.uploadedImages,
+    steps
+  };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "liveseller:viewer-message") {
     chrome.storage.session.set({
@@ -427,16 +550,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return false;
     }
     findOrCreateShopeeProductTab()
-      .then((tab) => chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: fillShopeeCreateProductForm,
-        args: [commands[0], { submit: false }]
-      }))
-      .then(([result]) => sendResponse({
-        ok: Boolean(result?.result?.ok),
-        status: result?.result?.ok ? "filled_authenticated_shopee_product_form" : "queued_for_authenticated_tab",
+      .then((tab) => fillShopeeProductDraft(tab, commands[0], { submit: false }))
+      .then((result) => sendResponse({
+        ok: Boolean(result?.ok),
+        status: result?.ok ? "filled_authenticated_shopee_product_form" : "queued_for_authenticated_tab",
         commandCount: commands.length,
-        evidence: result?.result
+        evidence: result
       }))
       .catch((error) => sendResponse({
         ok: false,
@@ -454,16 +573,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return false;
     }
     findOrCreateShopeeProductTab()
-      .then((tab) => chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: fillShopeeCreateProductForm,
-        args: [commands[0], { submit: true }]
-      }))
-      .then(([result]) => sendResponse({
-        ok: Boolean(result?.result?.ok && result?.result?.submitted),
-        status: result?.result?.submitted ? "submitted_authenticated_shopee_product_form" : "product_form_submit_not_available",
+      .then((tab) => fillShopeeProductDraft(tab, commands[0], { submit: true }))
+      .then((result) => sendResponse({
+        ok: Boolean(result?.ok && result?.submitted),
+        status: result?.submitted ? "submitted_authenticated_shopee_product_form" : "product_form_submit_not_available",
         commandCount: commands.length,
-        evidence: result?.result
+        evidence: result
       }))
       .catch((error) => sendResponse({
         ok: false,
