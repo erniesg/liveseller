@@ -4,7 +4,7 @@
 Seller material files / docs / folders
   -> apps/prep ingests files and extracts structured product identity, ProductRecord, PromoRecord, PolicyPack, assets, citations, photo enhancement plans, seller UI policy, and ProductReviewPlan
   -> server-side prep generation tasks run in parallel where useful, such as image-edit jobs, then update ProductReviewPlan task state
-  -> a Codex-native operator console may use codex app-server to host multi-round human review UX
+  -> a Codex-native operator console may use codex app-server to host multi-round human review UX and turn free-form seller responses into structured review intents/tool calls
   -> LiveSessionSpec is shared through packages/contracts
   -> apps/runtime receives RuntimeEvent values
   -> ContextEnvelope combines structured facts, policy flags, memory, and citations
@@ -23,6 +23,7 @@ Seller material files / docs / folders
 - Retrieval or file search can cite supporting evidence but cannot override structured fields.
 - AI draft updates can polish listing copy, seller guidance, and photo prompts, but cannot patch locked structured fields.
 - Seller review rounds always propose options and accept free-form responses so review can continue over multiple rounds.
+- Prep smoke scripts record explicit structured seller intents; intelligent free-form interpretation belongs in the Codex-native operator console or server-side agent layer.
 - SQLite stores canonical local records; JSONL stores immutable audit events.
 - Browser clients and extensions do not store long-lived OpenAI API keys.
 

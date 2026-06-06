@@ -34,7 +34,7 @@ npm run demo:runtime
 npm run dev:overlay
 ```
 
-`npm run live:prep:one-image` requires `OPENAI_API_KEY` in a local `.env`. It runs one seller product image through server-side `gpt-image-2` image editing, writes initial/updated/response review plans under ignored `artifacts/prep-live/`, records one free-form seller response, and confirms no create-product command is emitted before approval.
+`npm run live:prep:one-image` requires `OPENAI_API_KEY` in a local `.env`. It runs one repo fixture product image through server-side `gpt-image-2` image editing, writes initial/updated/response review plans under ignored `artifacts/prep-live/`, records one free-form seller response with an explicit structured `--seller-intent`, and confirms no create-product command is emitted before approval.
 
 ## Checkpoints
 

@@ -34,6 +34,7 @@ import {
   vintageJewelryProducts,
   vintageJewelrySessionMemory
 } from "@liveseller/contracts";
+import { existsSync } from "node:fs";
 
 describe("contract freeze", () => {
   it("accepts all shared valid fixtures", () => {
@@ -143,8 +144,13 @@ describe("contract freeze", () => {
     const imageLocators = vintageJewelryProducts.flatMap((product) =>
       product.media.images.flatMap((image) => image.citations.map((citation) => citation.locator))
     );
+    const publicAssetPaths = vintageJewelryProducts.flatMap((product) =>
+      product.media.images.map((image) => image.uri.replace(/^\//u, "apps/overlay/public/"))
+    );
 
-    expect(imageLocators.every((locator) => locator.startsWith("apps/overlay/public/assets/"))).toBe(true);
+    expect(imageLocators.every((locator) => locator.startsWith("apps/prep/fixtures/seller-drop/"))).toBe(true);
     expect(imageLocators.every((locator) => !locator.includes("/Users/"))).toBe(true);
+    expect(imageLocators.every((locator) => existsSync(locator))).toBe(true);
+    expect(publicAssetPaths.every((assetPath) => existsSync(assetPath))).toBe(true);
   });
 });

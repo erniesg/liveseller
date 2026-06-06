@@ -18,7 +18,7 @@ For the real one-image smoke with a local `.env` key, run:
 npm run live:prep:one-image
 ```
 
-This uses server-side `gpt-image-2` image editing to produce a generated product image, writes initial and updated `ProductReviewPlan` artifacts, records a free-form seller edit request as another review round, and verifies create-product commands remain at zero before approval. Codex app-server is for the future Codex-native operator console; it does not replace these prep contracts or OpenAI image API calls.
+This uses the repo fixture images in `apps/prep/fixtures/seller-drop/vintage-jewelry`, server-side `gpt-image-2` image editing to produce a generated product image, writes initial and updated `ProductReviewPlan` artifacts, records a free-form seller edit request as another review round, and verifies create-product commands remain at zero before approval. The smoke harness accepts explicit structured intent through `--seller-intent`; a Codex app-server operator console should be the intelligent layer that interprets free-form seller text, chooses whether to update the plan, request edits, generate more image variants, or publish after approval.
 
 ## 0:25-0:55 Safe Live Replies
 

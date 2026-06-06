@@ -578,19 +578,19 @@ export const validShopeeCreateProductCommand: ShopeeCreateProductCommand = {
 };
 
 const vintageJewelryCitation = {
-  sourceId: "downloads-liveseller",
+  sourceId: "repo-vintage-jewelry-fixtures",
   sourceType: "image" as const,
-  locator: "apps/overlay/public/assets/products/vintage-jewelry",
+  locator: "apps/prep/fixtures/seller-drop/vintage-jewelry",
   excerpt: "Repo fixture folder with vintage jewelry product images and Chinese social captions.",
   confidence: 0.86
 };
 
-function vintageImageCitation(assetPath: string, fileName: string): EvidenceCitation {
+function vintageImageCitation(fileName: string): EvidenceCitation {
   return {
-    sourceId: "downloads-liveseller",
+    sourceId: "repo-vintage-jewelry-fixtures",
     sourceType: "image",
-    locator: assetPath,
-    excerpt: `Seller supplied product photo copied from drop-folder file: ${fileName}`,
+    locator: `apps/prep/fixtures/seller-drop/vintage-jewelry/${fileName}`,
+    excerpt: `Seller supplied product photo copied from repo drop-folder file: ${fileName}`,
     confidence: 0.88
   };
 }
@@ -601,12 +601,11 @@ function vintageImage(
   alt: string,
   fileName: string
 ): ProductRecord["media"]["images"][number] {
-  const assetPath = uri.replace(/^\//u, "apps/overlay/public/");
   return {
     id,
     uri,
     alt,
-    citations: [vintageImageCitation(assetPath, fileName)]
+    citations: [vintageImageCitation(fileName)]
   };
 }
 
@@ -950,7 +949,7 @@ export const vintageJewelryLiveSessionSpec: LiveSessionSpec = {
   retrievalRefs: [
     {
       refId: "retrieval-vintage-jewelry-drop",
-      sourceId: "downloads-liveseller",
+      sourceId: "repo-vintage-jewelry-fixtures",
       productIds: vintageJewelryProducts.map((product) => product.id),
       policyIds: [vintageJewelryPolicyPack.id],
       languages: ["en", "zh", "ms", "ta"]

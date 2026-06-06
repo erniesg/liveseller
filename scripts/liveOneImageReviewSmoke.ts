@@ -31,6 +31,17 @@ function parseArg(name: string): string | undefined {
   return index === -1 ? undefined : process.argv[index + 1];
 }
 
+function parseSellerIntent(
+  value = "edit_request"
+): SellerFreeFormReviewResponse["interpretedIntent"] {
+  const allowed = ["approve", "reject", "edit_request", "more_options", "unknown"] as const;
+  if (allowed.includes(value as SellerFreeFormReviewResponse["interpretedIntent"])) {
+    return value as SellerFreeFormReviewResponse["interpretedIntent"];
+  }
+
+  throw new Error(`seller-intent must be one of: ${allowed.join(", ")}`);
+}
+
 function defaultOutputDir(): string {
   return join(
     process.cwd(),
@@ -52,29 +63,10 @@ function firstSellerDropImage(folder = DEFAULT_SELLER_DROP_FOLDER): string {
   return join(folder, fileName);
 }
 
-export function inferSellerIntent(text: string): SellerFreeFormReviewResponse["interpretedIntent"] {
-  const normalized = text.toLowerCase();
-  if (/\breject|rejected|no\b/u.test(normalized)) {
-    return "reject";
-  }
-  if (/\bmore options|more option|another option|alternate|alternative\b/u.test(normalized)) {
-    return "more_options";
-  }
-  if (/\bedit|change|shorter|revise|update|show me another|before i approve\b/u.test(normalized)) {
-    return "edit_request";
-  }
-  if (/\bapprove|approved|ok|okay|go ahead\b/u.test(normalized)) {
-    return "approve";
-  }
-  if (normalized.trim()) {
-    return "edit_request";
-  }
-  return "unknown";
-}
-
 export function buildSellerResponse(
   plan: ProductReviewPlan,
   text: string,
+  interpretedIntent: SellerFreeFormReviewResponse["interpretedIntent"],
   receivedAt = new Date().toISOString()
 ): SellerFreeFormReviewResponse {
   const item = required(plan.items[0]?.productId, "review plan item");
@@ -87,7 +79,7 @@ export function buildSellerResponse(
     productId: reviewItem.productId,
     text,
     receivedAt,
-    interpretedIntent: inferSellerIntent(text),
+    interpretedIntent,
     citations: reviewItem.product.evidence
   });
 }
@@ -99,6 +91,7 @@ async function main(): Promise<void> {
   const outputDir = resolve(parseArg("out") ?? defaultOutputDir());
   const sellerResponseText = parseArg("seller-response")
     ?? "Please make the title shorter and show me another image prompt option.";
+  const sellerIntent = parseSellerIntent(parseArg("seller-intent"));
 
   const livePrep = await runOneImageLivePrep({
     apiKey: required(process.env.OPENAI_API_KEY, "OPENAI_API_KEY"),
@@ -106,7 +99,7 @@ async function main(): Promise<void> {
     outputDir
   });
 
-  const sellerResponse = buildSellerResponse(livePrep.updatedReviewPlan, sellerResponseText);
+  const sellerResponse = buildSellerResponse(livePrep.updatedReviewPlan, sellerResponseText, sellerIntent);
   const responsePlan = recordSellerReviewResponse(livePrep.updatedReviewPlan, sellerResponse);
   const responsePlanPath = join(dirname(livePrep.updatedReviewPlanPath), "review-plan.response.json");
   writeFileSync(responsePlanPath, JSON.stringify(responsePlan, null, 2));
