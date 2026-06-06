@@ -34,6 +34,55 @@ function sessionIdFromUrl(url: string | undefined, pattern: RegExp): string | un
   return pattern.exec(url ?? "")?.[1];
 }
 
+export type RealtimeClientSecretResponse = {
+  status: number;
+  body: unknown;
+};
+
+export async function createRealtimeClientSecret(options: {
+  apiKey?: string;
+  fetchImpl?: typeof fetch;
+  model?: string;
+  voice?: string;
+} = {}): Promise<RealtimeClientSecretResponse> {
+  const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return {
+      status: 503,
+      body: {
+        error: "openai_api_key_missing",
+        message: "Set OPENAI_API_KEY on the runtime server to use realtime voice translation."
+      }
+    };
+  }
+
+  const response = await (options.fetchImpl ?? fetch)("https://api.openai.com/v1/realtime/client_secrets", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      session: {
+        type: "realtime",
+        model: options.model ?? process.env.OPENAI_REALTIME_MODEL ?? "gpt-realtime",
+        instructions:
+          "Translate Shopee Live host speech for shoppers. Keep product names, prices, stock counts, and promo terms exact. Do not invent offers.",
+        audio: {
+          output: {
+            voice: options.voice ?? process.env.OPENAI_REALTIME_VOICE ?? "marin"
+          }
+        }
+      }
+    })
+  });
+
+  return {
+    status: response.status,
+    body: await response.json()
+  };
+}
+
 async function readJson(req: import("node:http").IncomingMessage) {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -75,6 +124,12 @@ export function createRuntimeServer() {
         }
         const routed = store.route(event);
         sendJson(res, 200, routed);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/runtime/realtime/session") {
+        const session = await createRealtimeClientSecret();
+        sendJson(res, session.status, session.body);
         return;
       }
 

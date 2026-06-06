@@ -20,7 +20,7 @@ import {
   routeRuntimeEvent
 } from "../src/runtime";
 import { createRuntimeSessionStore } from "../src/sessionStore";
-import { createRuntimeServer } from "../src/server";
+import { createRealtimeClientSecret, createRuntimeServer } from "../src/server";
 
 function viewerEvent(text: string, language?: LanguageCode): RuntimeEvent {
   return {
@@ -131,6 +131,63 @@ describe("live brain policy runtime", () => {
     expect(result.auditEvents.map((event) => event.kind)).toEqual(
       expect.arrayContaining(["input", "context", "model_action", "tool_result"])
     );
+  });
+
+  it("keeps realtime voice translation client secrets server-owned", async () => {
+    const missing = await createRealtimeClientSecret({
+      apiKey: "",
+      fetchImpl: vi.fn() as unknown as typeof fetch
+    });
+
+    expect(missing).toMatchObject({
+      status: 503,
+      body: {
+        error: "openai_api_key_missing"
+      }
+    });
+
+    const requests: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({ input, init });
+      return new Response(
+        JSON.stringify({
+          client_secret: {
+            value: "ephemeral-redacted-for-test"
+          }
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    });
+    const session = await createRealtimeClientSecret({
+      apiKey: "server-test-key",
+      fetchImpl: fetchImpl as typeof fetch,
+      model: "gpt-realtime",
+      voice: "marin"
+    });
+
+    expect(session.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/realtime/client_secrets",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(requests[0]?.init?.headers).toMatchObject({
+      authorization: "Bearer server-test-key"
+    });
+    expect(JSON.parse(String(requests[0]?.init?.body))).toMatchObject({
+      session: {
+        type: "realtime",
+        model: "gpt-realtime",
+        audio: {
+          output: {
+            voice: "marin"
+          }
+        }
+      }
+    });
+    expect(JSON.stringify(requests[0]?.init?.body)).not.toContain("server-test-key");
   });
 
   it("generates create-product commands only after seller approval", () => {

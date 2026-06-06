@@ -39,10 +39,22 @@ Show the runtime tests or demo events for refund, fake/counterfeit, legal, fraud
 Run:
 
 ```bash
-npm run dev:overlay
+npm run dev:overlay:local
 ```
 
-Show product card, overlay-only promo, quantity, countdown, Chinese source caption, and English translated caption.
+Open the public viewer overlay:
+
+```text
+http://127.0.0.1:5180/?runtimeOrigin=http%3A%2F%2F127.0.0.1%3A8787&sessionId=live-vintage-jewelry-001
+```
+
+Show product card, overlay-only promo, quantity, countdown, Chinese source caption, and English translated caption. Then open the seller-private local console:
+
+```text
+http://127.0.0.1:5180/?mode=seller&runtimeOrigin=http%3A%2F%2F127.0.0.1%3A8787&sessionId=live-vintage-jewelry-001
+```
+
+Use this only for seller guidance, viewer-message testing, caption controls, and run-of-show rehearsal. These controls must not appear on the public overlay.
 
 ## 1:45-2:00 Summary
 

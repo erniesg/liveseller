@@ -408,6 +408,10 @@ describe("Shopee extension command safety", () => {
 
     expect(sidePanel).toContain('id="liveseller-codex-operator"');
     expect(sidePanel).toContain("Codex operator");
+    expect(sidePanel).toContain('id="liveseller-live-control"');
+    expect(sidePanel).toContain("Prepare livestream");
+    expect(sidePanel).toContain("Go Live in Shopee Seller Centre");
+    expect(sidePanel).toContain("does not press Go Live");
     expect(sidePanel).not.toMatch(/OPENAI|sk-/i);
   });
 });

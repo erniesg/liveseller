@@ -11,15 +11,34 @@
       <p id="connection">Waiting for runtime</p>
       <section id="liveseller-prep-review" aria-label="Seller material review" aria-live="polite">
         <h2>Seller review</h2>
-        <p>No seller material loaded.</p>
+        <p>Review products, edit product copy, then approve only listings that are ready for Shopee creation.</p>
+        <ol>
+          <li>Render product review plan.</li>
+          <li>Edit title, description, category, price, stock, and variants if needed.</li>
+          <li>Approve product to call <code>/api/prep/review-decisions</code>.</li>
+          <li>Execute returned <code>create_product</code> only after approved or edited review state.</li>
+        </ol>
       </section>
       <section id="liveseller-review-log" aria-label="Runtime action review" aria-live="polite">
         <h2>Runtime actions</h2>
-        <p>No viewer message captured.</p>
+        <p>Viewer messages and host events appear here as seller-only suggestions before any risky public action.</p>
       </section>
       <section id="liveseller-codex-operator" aria-label="Codex operator events" aria-live="polite">
         <h2>Codex operator</h2>
         <p>No Codex app-server session events yet.</p>
+      </section>
+      <section id="liveseller-live-control" aria-label="Private livestream control plan" aria-live="polite">
+        <h2>Private livestream setup</h2>
+        <p>
+          Prepare livestream creates the Shopee live session, captures stream credentials as redacted presence
+          evidence, and binds the public overlay preview. It does not press Go Live.
+        </p>
+        <button id="prepare-livestream" type="button">Prepare livestream</button>
+        <button id="go-live" type="button" disabled>Go Live in Shopee Seller Centre</button>
+        <p>
+          Go Live remains a high-risk manual Shopee Seller Centre click until explicit seller approval and camera
+          preview verification.
+        </p>
       </section>
       <section aria-label="Seller approvals">
         <button id="approve" type="button">Approve</button>
