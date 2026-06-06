@@ -5,9 +5,20 @@ These are the relevant development workflows for this repo. They are written as 
 ## Use Before Coding
 
 - Read `AGENTS.md`.
+- Run `git status --short --branch`.
+- If the tree is clean, run `git fetch --all --prune` and `git pull --ff-only` before starting or resuming work.
+- If the tree is dirty, do not pull or rebase until the local changes are understood, committed, or explicitly handed off.
 - Identify the lane and checkpoint.
 - State the target definition of done.
 - Inspect existing contracts and fixtures before changing behavior.
+
+## Collaboration Loop
+
+- Keep work sliced into small, reviewable commits.
+- Commit after a meaningful verified change: passing relevant checks, updated tests/docs, and no unrelated files staged.
+- Push immediately after each successful commit on a shared branch.
+- Use `git pull --ff-only` at clean task boundaries so local work never silently rewrites teammate history.
+- If Git reports divergence or conflicts, stop and document the branch, files, and failed command before making history-changing moves.
 
 ## Recommended Superpower-Style Workflows
 
