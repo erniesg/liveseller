@@ -69,7 +69,28 @@ function summarizeSellerMaterial(result: SellerMaterialIngestionResult, folder: 
       sourceImageCount: plan.sourceImageUris.length,
       promptCount: plan.prompts.length
     })),
-    sellerUiPolicy: result.sellerUiPolicy
+    sellerUiPolicy: result.sellerUiPolicy,
+    productReviewPlan: {
+      reviewPlanId: result.productReviewPlan.reviewPlanId,
+      status: result.productReviewPlan.status,
+      products: result.productReviewPlan.items.map((item) => ({
+        productId: item.productId,
+        decisionStatus: item.decision.status,
+        reviewRoundCount: item.reviewRounds.length,
+        reviewOptions: item.reviewRounds.at(-1)?.options.map((option) => ({
+          label: option.label,
+          intent: option.intent
+        })),
+        aiUpdatableFields: item.aiUpdatableFields,
+        lockedStructuredFields: item.lockedStructuredFields
+      })),
+      generationTasks: result.productReviewPlan.generationTasks.map((task) => ({
+        taskId: task.taskId,
+        productId: task.productId,
+        taskType: task.taskType,
+        status: task.status
+      }))
+    }
   };
 }
 

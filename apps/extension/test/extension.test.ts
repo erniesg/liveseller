@@ -5,9 +5,13 @@ import { fileURLToPath } from "node:url";
 import {
   validAuditEvent,
   validLiveAction,
-  validLiveSessionSpec
+  validLiveSessionSpec,
+  validShopeeCreateProductCommand
 } from "@liveseller/contracts";
-import { executeSellerCommand } from "../src/commandExecutor";
+import {
+  executeSellerCommand,
+  executeShopeeCreateProductCommand
+} from "../src/commandExecutor";
 import {
   extractViewerMessage,
   handleReceiveNormalUserMessage,
@@ -52,6 +56,23 @@ describe("Shopee extension command safety", () => {
 
     expect(result.toolResult.status).toBe("applied");
     expect(result.publicSend).toBe(true);
+  });
+
+  it("executes create-product commands only when backed by approved review state", () => {
+    const approved = executeShopeeCreateProductCommand(validShopeeCreateProductCommand);
+
+    expect(approved.toolResult.status).toBe("applied");
+    expect(approved.command).toBeDefined();
+    expect(approved.command?.kind).toBe("create_product");
+    expect(approved.command?.payload.product.price).toBe(validShopeeCreateProductCommand.payload.product.price);
+
+    const pending = executeShopeeCreateProductCommand({
+      ...validShopeeCreateProductCommand,
+      approvalStatus: "pending"
+    });
+
+    expect(pending.toolResult.status).toBe("rejected");
+    expect(pending.command).toBeUndefined();
   });
 
   it("captures viewer messages from audited DOM rows", () => {

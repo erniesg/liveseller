@@ -4,9 +4,11 @@
 
 All lane boundaries use the Zod schemas from `@liveseller/contracts`.
 
-- Prep emits `LiveSessionSpec`, `ProductRecord[]`, `PromoRecord[]`, `PolicyPack`, product identity drafts, citations, assets, missing-field report, seller guidance, photo enhancement plans, and seller UI policy.
+- Prep emits `LiveSessionSpec`, `ProductRecord[]`, `PromoRecord[]`, `PolicyPack`, product identity drafts, citations, assets, missing-field report, seller guidance, photo enhancement plans, seller UI policy, and `ProductReviewPlan`.
 - Runtime consumes `RuntimeEvent` and emits `LiveAction[]`, `ToolResult[]`, `AuditEvent[]`, and `OverlayState`.
-- Extension consumes approved `LiveAction` values and emits `ToolResult`.
+- Runtime records free-form seller review responses against review rounds; edit requests or more-options requests create another option round.
+- Runtime records product review decisions and derives `ShopeeCreateProductCommand[]` only for approved or human-edited review items.
+- Extension consumes approved `LiveAction` values or approved `ShopeeCreateProductCommand` values and emits `ToolResult`.
 - Overlay consumes `OverlayState` or overlay-safe `LiveAction` updates.
 
 ## Local Runtime API
@@ -51,7 +53,13 @@ Implemented in `apps/prep/src/index.ts`.
 - `discoverSellerMaterialFiles(inputPath)`
   - Accepts a file, document, or folder and classifies each discovered file as `image`, `document`, or `other`.
 - `buildSellerMaterialIngestion(inputPath, options?)`
-  - Returns structured product identity drafts, product records, promo/policy data, citations, assets, missing-field report, seller guidance, server-side photo enhancement plans, seller UI policy, and valid `LiveSessionSpec`.
+  - Returns structured product identity drafts, product records, promo/policy data, citations, assets, missing-field report, seller guidance, server-side photo enhancement plans, seller UI policy, `ProductReviewPlan`, and valid `LiveSessionSpec`.
+- `applyAiDraftUpdate(reviewPlan, update)`
+  - Applies AI copy, guidance, or photo-prompt updates to a review plan.
+  - Rejects locked structured fields through the shared `AiDraftUpdate` schema; price, stock, SKU, variants, Shopee IDs, and promo eligibility stay structured.
+- `runPendingPrepGenerationTasks(reviewPlan, runner)`
+  - Runs pending prep generation tasks, such as server-side image-edit tasks, in parallel and returns a review plan only after the task promises settle.
+  - Task results are recorded as `completed` or `failed`; browser clients and extensions still do not call OpenAI image models.
 - `discoverSellerDropFolderAssets(folder)`
   - Reads seller-supplied image files from a local folder.
   - Groups files by matching each file name to product image citations ending in `drop-folder file: <fileName>`.
@@ -72,3 +80,17 @@ Prep emits `sellerUiPolicy` for the Chrome extension side panel.
   - Server-side `gpt-image-2` prompt counts and source-image counts. The extension renders these; it does not call image models.
 - `publicAutomation`
   - Low-risk structured facts are the only auto-send lane. Refund, legal, fake/counterfeit, fraud, discount, and unclear risky cases require approval or are blocked from public auto-send.
+
+## Review-To-Publish Payloads
+
+- `ProductReviewPlan`
+  - One item per structured product, with draft identity, seller guidance, photo enhancement plan, option-based review rounds, free-form response support, AI-updatable fields, locked structured fields, draft update history, async generation tasks, and human decision state.
+- `SellerReviewRound`
+  - Always includes at least two proposed options and enables free-form seller responses.
+- `PrepGenerationTask`
+  - Tracks pending/running/completed/failed prep work such as image-edit jobs so the review plan can wait for parallel generation before publishing.
+- `ProductReviewDecision`
+  - Tracks `pending`, `approved`, `rejected`, or `edited` seller state.
+- `ShopeeCreateProductCommand`
+  - Deterministic extension command for `create_product`.
+  - Valid only when backed by an `approved` or `edited` product review decision.

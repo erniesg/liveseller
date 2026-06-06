@@ -1,14 +1,23 @@
 import type {
+  AiDraftUpdate,
   AuditEvent,
   EvidenceCitation,
+  ImageGenerationPlan,
   LiveAction,
   LiveSessionSpec,
   OverlayState,
   PolicyPack,
+  PrepGenerationTask,
+  ProductReviewPlan,
   ProductRecord,
   PromoRecord,
   RuntimeEvent,
   SessionMemory,
+  SellerFreeFormReviewResponse,
+  SellerGuidance,
+  SellerReviewRound,
+  SellerUiPolicy,
+  ShopeeCreateProductCommand,
   ViewerMemory
 } from "./schemas";
 
@@ -312,6 +321,260 @@ export const validSessionMemory: SessionMemory = {
   escalations: [],
   recommendations: ["Show the cable pouch after the tee because viewers asked about travel use."],
   updatedAt: now
+};
+
+const reviewAiUpdatableFields = [
+  "title",
+  "aliases",
+  "category",
+  "description",
+  "listingDraft",
+  "sellerGuidance",
+  "photoEnhancementPrompts"
+] as const;
+
+const reviewLockedStructuredFields = [
+  "sku",
+  "price",
+  "stock",
+  "variants",
+  "shopeeProductId",
+  "promoEligibility"
+] as const;
+
+function validReviewGuidance(product: ProductRecord): SellerGuidance {
+  return {
+    productId: product.id,
+    talkTrack: `Show ${product.title} and keep price, stock, SKU, and variants tied to structured records.`,
+    researchNotes: [
+      `Structured category: ${product.category}.`,
+      "AI can polish wording, but cannot change price, stock, SKU, variants, Shopee IDs, or promo eligibility."
+    ],
+    likelyBuyerQuestions: ["How much is it?", "How many are left?", "Which variants are available?"],
+    riskNotes: ["Seller approval is required before creating a Shopee product listing."]
+  };
+}
+
+function validImageGenerationPlan(product: ProductRecord): ImageGenerationPlan {
+  return {
+    productId: product.id,
+    model: "gpt-image-2",
+    sourceImageUris: product.media.images.map((image) => image.uri),
+    prompts: [
+      `Create a square Shopee cover for ${product.title} using supplied product images only.`,
+      `Create a livestream product card crop for ${product.title} without inventing variants.`,
+      `Create a clean catalog alternate for ${product.title} while preserving visible condition.`
+    ]
+  };
+}
+
+function validReviewRound(product: ProductRecord): SellerReviewRound {
+  return {
+    roundId: `round-${product.id}-001`,
+    productId: product.id,
+    proposedAt: now,
+    prompt:
+      "Review the drafted Shopee listing. Choose an option or reply freely with edits, rejection reasons, or requests for more options.",
+    options: [
+      {
+        optionId: `option-${product.id}-approve`,
+        label: "Approve draft",
+        description: "Use the structured product facts and current listing draft as-is.",
+        intent: "approve_as_is"
+      },
+      {
+        optionId: `option-${product.id}-edit`,
+        label: "Request edits",
+        description: "Reply with free-form wording, image, or policy edits before publishing.",
+        intent: "request_edit"
+      },
+      {
+        optionId: `option-${product.id}-more-options`,
+        label: "More options",
+        description: "Ask the agent to propose another set of listing or image directions.",
+        intent: "request_more_options"
+      }
+    ],
+    freeFormResponseMode: "enabled"
+  };
+}
+
+function validGenerationTasks(product: ProductRecord): PrepGenerationTask[] {
+  const completedTaskBase = {
+    productId: product.id,
+    status: "completed" as const,
+    outputRefs: [`review://${product.id}`],
+    dependsOnTaskIds: [],
+    startedAt: now,
+    completedAt: now,
+    citations: product.evidence
+  };
+
+  return [
+    {
+      ...completedTaskBase,
+      taskId: `task-${product.id}-identity-draft`,
+      taskType: "identity_draft",
+      inputRefs: product.evidence.map((citation) => citation.locator)
+    },
+    {
+      ...completedTaskBase,
+      taskId: `task-${product.id}-seller-guidance`,
+      taskType: "seller_guidance",
+      inputRefs: [product.id]
+    },
+    {
+      ...completedTaskBase,
+      taskId: `task-${product.id}-photo-prompt`,
+      taskType: "photo_prompt",
+      inputRefs: product.media.images.map((image) => image.uri)
+    },
+    ...product.media.images.map((image) => ({
+      taskId: `task-${product.id}-image-edit-${image.id}`,
+      productId: product.id,
+      taskType: "image_edit" as const,
+      status: "pending" as const,
+      inputRefs: [image.uri],
+      outputRefs: [],
+      dependsOnTaskIds: [`task-${product.id}-photo-prompt`],
+      citations: image.citations
+    }))
+  ];
+}
+
+export const validAiDraftUpdate: AiDraftUpdate = {
+  updateId: "ai-update-prod-cooling-tee-001",
+  productId: validProducts[0]!.id,
+  actor: "ai",
+  updatedAt: "2026-06-06T02:05:00.000Z",
+  reason: "Polish listing copy while preserving structured price, stock, SKU, and variants.",
+  patch: {
+    title: "Bamboo Cooling Tee - Seller Review Draft",
+    listingDraft: {
+      title: "Bamboo Cooling Tee - Seller Review Draft",
+      description: "Breathable bamboo-blend tee copy prepared for seller review.",
+      bulletPoints: ["Breathable bamboo blend", "Structured stock unchanged", "Seller approval required"]
+    },
+    sellerGuidance: {
+      talkTrack: "Show fabric drape and sizing, then quote only structured price and stock.",
+      riskNotes: ["Do not claim medical cooling benefits."]
+    },
+    photoEnhancementPrompts: [
+      "Create a square Shopee cover that preserves the exact tee shape, color, and variants."
+    ]
+  },
+  citations: [seedCitation]
+};
+
+export const validSellerFreeFormReviewResponse: SellerFreeFormReviewResponse = {
+  responseId: "response-prod-cooling-tee-001",
+  roundId: `round-${validProducts[0]!.id}-001`,
+  productId: validProducts[0]!.id,
+  text: "Please make the title shorter, then show me another image prompt option.",
+  receivedAt: "2026-06-06T02:12:00.000Z",
+  selectedOptionId: `option-${validProducts[0]!.id}-edit`,
+  interpretedIntent: "edit_request",
+  citations: [seedCitation]
+};
+
+const validSellerUiPolicy: SellerUiPolicy = {
+  sessionId: validLiveSessionSpec.sessionId,
+  status: "seller_review_required",
+  products: validProducts.map((product) => ({
+    productId: product.id,
+    title: product.title,
+    sku: product.sku,
+    priceLabel: `${product.currency} ${product.price.toFixed(2)}`,
+    stockLabel: `${product.stock} in structured stock`,
+    imageCount: product.media.images.length,
+    missingFields: product.shopeeProductId ? [] : ["shopeeProductId"],
+    reviewRequired: true
+  })),
+  photoEnhancement: validProducts.map((product) => ({
+    productId: product.id,
+    model: "gpt-image-2",
+    sourceImageCount: product.media.images.length,
+    promptCount: 3,
+    requiresApproval: true
+  })),
+  publicAutomation: {
+    autoSend: "low_risk_structured_only",
+    approvalRequired: [
+      "product listing creation",
+      "discounts not backed by structured Shopee promo records",
+      "material, warranty, or condition claims missing from structured records"
+    ],
+    blockedAutoSend: [
+      "fake-product accusation",
+      "fraud or legal threat",
+      "refund commitment",
+      "unauthorized discount",
+      "unclear risky request"
+    ]
+  },
+  renderHints: {
+    sidePanelSectionId: "liveseller-prep-review",
+    productAttribute: "data-liveseller-product-id",
+    actionAttribute: "data-liveseller-action-id"
+  }
+};
+
+export const validProductReviewPlan: ProductReviewPlan = {
+  reviewPlanId: "review-live-seed-001",
+  sessionId: validLiveSessionSpec.sessionId,
+  generatedAt: now,
+  updatedAt: now,
+  status: "seller_review_required",
+  items: validProducts.map((product) => ({
+    productId: product.id,
+    product,
+    identityDraft: {
+      productId: product.id,
+      title: product.title,
+      sku: product.sku,
+      aliases: product.aliases,
+      category: product.category,
+      price: product.price,
+      currency: product.currency,
+      stock: product.stock,
+      variantCount: product.variants.length,
+      imageCount: product.media.images.length,
+      sourceConfidence: product.sourceConfidence,
+      identitySource: "structured_fixture",
+      missingFields: product.shopeeProductId ? [] : ["shopeeProductId"],
+      evidence: product.evidence
+    },
+    sellerGuidance: validReviewGuidance(product),
+    photoEnhancementPlan: validImageGenerationPlan(product),
+    aiUpdatableFields: [...reviewAiUpdatableFields],
+    lockedStructuredFields: [...reviewLockedStructuredFields],
+    draftUpdates: product.id === validAiDraftUpdate.productId ? [validAiDraftUpdate] : [],
+    reviewRounds: [validReviewRound(product)],
+    decision: {
+      decisionId: `decision-${product.id}-pending`,
+      productId: product.id,
+      status: "pending",
+      reason: "Seller has not reviewed this product listing draft.",
+      citations: product.evidence
+    }
+  })),
+  generationTasks: validProducts.flatMap((product) => validGenerationTasks(product)),
+  sellerUiPolicy: validSellerUiPolicy,
+  citations: [seedCitation]
+};
+
+export const validShopeeCreateProductCommand: ShopeeCreateProductCommand = {
+  commandId: "cmd-create-prod-cooling-tee",
+  sessionId: validLiveSessionSpec.sessionId,
+  productId: validProducts[0]!.id,
+  kind: "create_product",
+  createdAt: "2026-06-06T02:20:00.000Z",
+  approvalDecisionId: "decision-prod-cooling-tee-approved",
+  approvalStatus: "approved",
+  payload: {
+    product: validProducts[0]!
+  },
+  citations: validProducts[0]!.evidence
 };
 
 const vintageJewelryCitation = {
@@ -827,5 +1090,55 @@ export const badFixtures = {
   mismatchedActionPayload: {
     ...validLiveAction,
     type: "draft_reply"
+  },
+  aiDraftUpdateChangesLockedPrice: {
+    ...validAiDraftUpdate,
+    patch: {
+      ...validAiDraftUpdate.patch,
+      price: 1
+    }
+  },
+  productReviewPlanIdMismatch: {
+    ...validProductReviewPlan,
+    items: [
+      {
+        ...validProductReviewPlan.items[0]!,
+        identityDraft: {
+          ...validProductReviewPlan.items[0]!.identityDraft,
+          productId: "prod-other"
+        }
+      }
+    ]
+  },
+  editedDecisionWithoutEditedProduct: {
+    ...validProductReviewPlan,
+    items: [
+      {
+        ...validProductReviewPlan.items[0]!,
+        decision: {
+          decisionId: "decision-prod-cooling-tee-edited",
+          productId: validProductReviewPlan.items[0]!.productId,
+          status: "edited",
+          decidedBy: "seller",
+          decidedAt: "2026-06-06T02:15:00.000Z",
+          reason: "Seller edited the product listing draft.",
+          citations: validProductReviewPlan.items[0]!.product.evidence
+        }
+      }
+    ]
+  },
+  productReviewPlanWithoutOptions: {
+    ...validProductReviewPlan,
+    items: [
+      {
+        ...validProductReviewPlan.items[0]!,
+        reviewRounds: [
+          {
+            ...validProductReviewPlan.items[0]!.reviewRounds[0]!,
+            options: []
+          }
+        ]
+      }
+    ]
   }
 } as const;

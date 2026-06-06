@@ -9,6 +9,7 @@ Done when:
 - `packages/contracts` exports all shared Zod schemas and types.
 - Valid fixtures parse successfully.
 - Bad fixtures fail, including private action payload fields.
+- Review-to-publish contracts cover `ProductReviewPlan`, `SellerReviewRound`, `SellerFreeFormReviewResponse`, `PrepGenerationTask`, `AiDraftUpdate`, and `ShopeeCreateProductCommand`.
 - Prep, runtime, overlay, and extension packages import `@liveseller/contracts`.
 
 Verify:
@@ -22,8 +23,10 @@ npm run typecheck
 
 Done when:
 
-- Seller material files, docs, or folders produce structured product identity drafts, promo/policy data, citations, assets, missing-field report, photo enhancement plans, seller UI policy, and valid `LiveSessionSpec`.
+- Seller material files, docs, or folders produce structured product identity drafts, promo/policy data, citations, assets, missing-field report, photo enhancement plans, seller UI policy, product review plan, and valid `LiveSessionSpec`.
 - Price, stock, variants, and promo eligibility remain structured.
+- AI draft updates can only touch draft copy, seller guidance, and photo prompts.
+- Review plans always propose options, accept free-form responses, and track pending server-side image-edit tasks.
 - Retrieval evidence does not override structured records.
 
 Verify:
@@ -41,6 +44,8 @@ Done when:
 - Refund, fraud, legal, fake/counterfeit, and discount-negotiation cases never auto-send.
 - Chinese host speech emits source and English translated captions.
 - Every action includes risk, reason, citations, and approval state.
+- Free-form review feedback can produce another option round before approval.
+- Product review decisions emit create-product commands only after seller approval or human edit.
 
 Verify:
 
@@ -55,6 +60,7 @@ Done when:
 
 - Overlay renders product, promo, countdown, quantity, and multilingual captions.
 - Extension command executor avoids overwriting seller typing.
+- Extension create-product executor rejects commands without approved or human-edited review state.
 - Risky actions are not public sends.
 - Real Shopee tab proof is recorded in `docs/shopee-ui-audit.md`.
 

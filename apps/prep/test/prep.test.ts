@@ -4,7 +4,9 @@ import { join } from "node:path";
 import {
   type EvidenceCitation,
   type ProductRecord,
+  AiDraftUpdateSchema,
   LiveSessionSpecSchema,
+  ProductReviewPlanSchema,
   ProductRecordSchema,
   PromoRecordSchema,
   seedCitation,
@@ -15,6 +17,8 @@ import {
   buildSellerDropFolderExtraction,
   buildSellerMaterialIngestion,
   buildMissingFieldReport,
+  applyAiDraftUpdate,
+  runPendingPrepGenerationTasks,
   discoverSellerDropFolderAssets,
   buildSeedExtraction,
   readSeedDocuments
@@ -255,6 +259,151 @@ describe("prep catalog brain", () => {
       reviewRequired: true,
       imageCount: 2
     });
+    expect(() => ProductReviewPlanSchema.parse(result.productReviewPlan)).not.toThrow();
+    expect(result.productReviewPlan.items[0]).toMatchObject({
+      productId: "prod-custom-camera-strap",
+      decision: {
+        status: "pending"
+      },
+      reviewRounds: [
+        expect.objectContaining({
+          freeFormResponseMode: "enabled",
+          options: expect.arrayContaining([
+            expect.objectContaining({ intent: "approve_as_is" }),
+            expect.objectContaining({ intent: "request_edit" })
+          ])
+        })
+      ],
+      lockedStructuredFields: expect.arrayContaining(["sku", "price", "stock", "variants", "promoEligibility"]),
+      aiUpdatableFields: expect.arrayContaining([
+        "title",
+        "listingDraft",
+        "sellerGuidance",
+        "photoEnhancementPrompts"
+      ])
+    });
+    expect(result.productReviewPlan.generationTasks.filter((task) => task.taskType === "image_edit")).toHaveLength(2);
+  });
+
+  it("builds a reviewable seller material plan from one product image", () => {
+    const folder = mkdtempSync(join(tmpdir(), "liveseller-one-image-"));
+    const fileNames = ["custom-strap.jpg"];
+    writeFileSync(join(folder, fileNames[0]!), "fixture image bytes");
+
+    const product = customDropProduct(fileNames);
+    const result = buildSellerMaterialIngestion(folder, {
+      products: [product],
+      liveSessionSpec: {
+        ...vintageJewelryLiveSessionSpec,
+        sessionId: "live-one-image-material-001",
+        products: [product]
+      }
+    });
+
+    expect(result.products).toHaveLength(1);
+    expect(result.productReviewPlan.items[0]?.product.media.images).toHaveLength(1);
+    expect(result.productReviewPlan.items[0]?.reviewRounds[0]?.options.length).toBeGreaterThanOrEqual(2);
+    expect(result.productReviewPlan.generationTasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: "prod-custom-camera-strap",
+          taskType: "image_edit",
+          status: "pending"
+        })
+      ])
+    );
+  });
+
+  it("applies AI draft updates without changing locked structured product facts", () => {
+    const folder = mkdtempSync(join(tmpdir(), "liveseller-material-update-"));
+    const fileNames = ["custom-strap.jpg", "custom-strap (1).jpg"];
+    for (const fileName of fileNames) {
+      writeFileSync(join(folder, fileName), "fixture image bytes");
+    }
+
+    const product = customDropProduct(fileNames);
+    const result = buildSellerMaterialIngestion(folder, {
+      products: [product],
+      liveSessionSpec: {
+        ...vintageJewelryLiveSessionSpec,
+        sessionId: "live-custom-material-update-001",
+        products: [product]
+      }
+    });
+    const update = AiDraftUpdateSchema.parse({
+      updateId: "ai-update-custom-strap-001",
+      productId: "prod-custom-camera-strap",
+      actor: "ai",
+      updatedAt: "2026-06-06T02:10:00.000Z",
+      reason: "Improve review draft wording while preserving structured facts.",
+      citations: product.evidence,
+      patch: {
+        title: "Custom Camera Strap - Seller Review Draft",
+        listingDraft: {
+          title: "Custom Camera Strap - Seller Review Draft",
+          description: "Adjustable stitched camera strap prepared for seller review.",
+          bulletPoints: ["Adjustable strap", "Seller should confirm length", "Structured price unchanged"]
+        },
+        sellerGuidance: {
+          talkTrack: "Show stitching, attachment points, and strap length before quoting details.",
+          researchNotes: ["Length remains seller-confirmation only."],
+          likelyBuyerQuestions: ["How long is it?", "Will it fit my camera?"],
+          riskNotes: ["Compatibility claims require seller confirmation."]
+        },
+        photoEnhancementPrompts: [
+          "Create a square Shopee cover that preserves the exact strap shape and stitching."
+        ]
+      }
+    });
+
+    const updatedPlan = applyAiDraftUpdate(result.productReviewPlan, update);
+
+    expect(updatedPlan.items[0]?.identityDraft.title).toBe("Custom Camera Strap - Seller Review Draft");
+    expect(updatedPlan.items[0]?.product.price).toBe(product.price);
+    expect(updatedPlan.items[0]?.product.stock).toBe(product.stock);
+    expect(updatedPlan.items[0]?.product.sku).toBe(product.sku);
+    expect(updatedPlan.items[0]?.photoEnhancementPlan.prompts).toEqual(update.patch.photoEnhancementPrompts);
+  });
+
+  it("runs pending image-edit prep generation tasks in parallel and waits for completion", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "liveseller-material-parallel-"));
+    const fileNames = ["custom-strap.jpg", "custom-strap (1).jpg"];
+    for (const fileName of fileNames) {
+      writeFileSync(join(folder, fileName), "fixture image bytes");
+    }
+
+    const product = customDropProduct(fileNames);
+    const result = buildSellerMaterialIngestion(folder, {
+      products: [product],
+      liveSessionSpec: {
+        ...vintageJewelryLiveSessionSpec,
+        sessionId: "live-parallel-material-001",
+        products: [product]
+      }
+    });
+    let active = 0;
+    let maxActive = 0;
+
+    const completedPlan = await runPendingPrepGenerationTasks(
+      result.productReviewPlan,
+      async (task) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return {
+          outputRefs: [`generated://${task.taskId}`],
+          citations: task.citations
+        };
+      },
+      "2026-06-06T02:20:00.000Z"
+    );
+
+    expect(maxActive).toBeGreaterThan(1);
+    expect(completedPlan.generationTasks.filter((task) => task.taskType === "image_edit")).toEqual([
+      expect.objectContaining({ status: "completed" }),
+      expect.objectContaining({ status: "completed" })
+    ]);
   });
 
   it("surfaces actual seller fixtures in the prep demo instead of seed products", () => {

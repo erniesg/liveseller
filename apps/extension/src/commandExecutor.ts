@@ -1,6 +1,8 @@
 import {
   type LiveAction,
+  type ShopeeCreateProductCommand,
   type ToolResult,
+  ShopeeCreateProductCommandSchema,
   ToolResultSchema
 } from "@liveseller/contracts";
 
@@ -15,6 +17,11 @@ export type ExecutedCommand = {
   publicSend: boolean;
 };
 
+export type ExecutedProductCommand = {
+  toolResult: ToolResult;
+  command?: ShopeeCreateProductCommand;
+};
+
 const extensionEvidence = [
   {
     sourceId: "extension-command-executor",
@@ -25,9 +32,9 @@ const extensionEvidence = [
   }
 ];
 
-function result(action: LiveAction, status: ToolResult["status"], error?: string): ToolResult {
+function result(actionId: string, status: ToolResult["status"], error?: string): ToolResult {
   return ToolResultSchema.parse({
-    actionId: action.actionId,
+    actionId,
     adapter: "shopee-content-script",
     status,
     evidence: extensionEvidence,
@@ -44,7 +51,7 @@ export function executeSellerCommand(action: LiveAction, composer: ComposerState
   if (action.type === "send_reply") {
     if (action.risk !== "low" || action.requiresApproval || action.payload.kind !== "send_reply") {
       return {
-        toolResult: result(action, "rejected", "send_reply requires low risk and no approval"),
+        toolResult: result(action.actionId, "rejected", "send_reply requires low risk and no approval"),
         nextComposerValue: composer.value,
         publicSend: false
       };
@@ -52,14 +59,14 @@ export function executeSellerCommand(action: LiveAction, composer: ComposerState
 
     if (!canWriteDraft(composer)) {
       return {
-        toolResult: result(action, "skipped", "seller is typing or composer is not empty"),
+        toolResult: result(action.actionId, "skipped", "seller is typing or composer is not empty"),
         nextComposerValue: composer.value,
         publicSend: false
       };
     }
 
     return {
-      toolResult: result(action, "applied"),
+      toolResult: result(action.actionId, "applied"),
       nextComposerValue: "",
       publicSend: true
     };
@@ -68,14 +75,14 @@ export function executeSellerCommand(action: LiveAction, composer: ComposerState
   if (action.type === "draft_reply" && action.payload.kind === "draft_reply") {
     if (!canWriteDraft(composer)) {
       return {
-        toolResult: result(action, "skipped", "seller is typing or composer is not empty"),
+        toolResult: result(action.actionId, "skipped", "seller is typing or composer is not empty"),
         nextComposerValue: composer.value,
         publicSend: false
       };
     }
 
     return {
-      toolResult: result(action, "applied"),
+      toolResult: result(action.actionId, "applied"),
       nextComposerValue: action.payload.text,
       publicSend: false
     };
@@ -83,15 +90,43 @@ export function executeSellerCommand(action: LiveAction, composer: ComposerState
 
   if (action.type === "escalate" || action.type === "request_approval") {
     return {
-      toolResult: result(action, "applied"),
+      toolResult: result(action.actionId, "applied"),
       nextComposerValue: composer.value,
       publicSend: false
     };
   }
 
   return {
-    toolResult: result(action, "skipped", "action is not handled by the seller tab"),
+    toolResult: result(action.actionId, "skipped", "action is not handled by the seller tab"),
     nextComposerValue: composer.value,
     publicSend: false
+  };
+}
+
+function readCommandId(value: unknown): string {
+  if (value && typeof value === "object" && "commandId" in value) {
+    const commandId = (value as { commandId?: unknown }).commandId;
+    if (typeof commandId === "string" && commandId.trim().length > 0) {
+      return commandId;
+    }
+  }
+  return "unknown-create-product-command";
+}
+
+export function executeShopeeCreateProductCommand(input: unknown): ExecutedProductCommand {
+  const parsed = ShopeeCreateProductCommandSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      toolResult: result(
+        readCommandId(input),
+        "rejected",
+        "create_product requires approved or edited product review state"
+      )
+    };
+  }
+
+  return {
+    toolResult: result(parsed.data.commandId, "applied"),
+    command: parsed.data
   };
 }

@@ -2,8 +2,16 @@ import {
   type LanguageCode,
   type RuntimeEvent,
   LiveActionSchema,
+  ShopeeCreateProductCommandSchema,
+  validSellerFreeFormReviewResponse,
+  validProductReviewPlan,
   validLiveSessionSpec
 } from "@liveseller/contracts";
+import {
+  buildShopeeCreateProductCommands,
+  recordSellerReviewResponse,
+  recordProductReviewDecision
+} from "../src/approvals";
 import {
   buildContextEnvelope,
   decideActions,
@@ -119,5 +127,65 @@ describe("live brain policy runtime", () => {
     expect(result.auditEvents.map((event) => event.kind)).toEqual(
       expect.arrayContaining(["input", "context", "model_action", "tool_result"])
     );
+  });
+
+  it("generates create-product commands only after seller approval", () => {
+    expect(buildShopeeCreateProductCommands(validProductReviewPlan)).toEqual([]);
+
+    const approvedPlan = recordProductReviewDecision(validProductReviewPlan, {
+      decisionId: "decision-prod-cooling-tee-approved",
+      productId: "prod-cooling-tee",
+      status: "approved",
+      decidedBy: "seller",
+      decidedAt: "2026-06-06T02:15:00.000Z",
+      reason: "Seller approved structured listing draft.",
+      citations: validProductReviewPlan.items[0]!.product.evidence
+    });
+
+    const commands = buildShopeeCreateProductCommands(approvedPlan);
+
+    expect(commands).toHaveLength(1);
+    expect(() => ShopeeCreateProductCommandSchema.parse(commands[0])).not.toThrow();
+    expect(commands[0]).toMatchObject({
+      kind: "create_product",
+      approvalDecisionId: "decision-prod-cooling-tee-approved",
+      approvalStatus: "approved",
+      productId: "prod-cooling-tee"
+    });
+    expect(commands[0]?.payload.product.price).toBe(validProductReviewPlan.items[0]!.product.price);
+    expect(commands[0]?.payload.product.stock).toBe(validProductReviewPlan.items[0]!.product.stock);
+  });
+
+  it("keeps rejected and pending product review items out of publish commands", () => {
+    const rejectedPlan = recordProductReviewDecision(validProductReviewPlan, {
+      decisionId: "decision-prod-cooling-tee-rejected",
+      productId: "prod-cooling-tee",
+      status: "rejected",
+      decidedBy: "seller",
+      decidedAt: "2026-06-06T02:15:00.000Z",
+      reason: "Seller rejected the listing draft.",
+      citations: validProductReviewPlan.items[0]!.product.evidence
+    });
+
+    expect(buildShopeeCreateProductCommands(rejectedPlan)).toEqual([]);
+  });
+
+  it("records free-form seller review feedback and proposes another option round", () => {
+    const updatedPlan = recordSellerReviewResponse(validProductReviewPlan, {
+      ...validSellerFreeFormReviewResponse,
+      text: "Make the title shorter and show me another image prompt option.",
+      interpretedIntent: "edit_request"
+    });
+    const firstItem = updatedPlan.items[0]!;
+
+    expect(firstItem.reviewRounds[0]?.response?.text).toContain("title shorter");
+    expect(firstItem.reviewRounds).toHaveLength(2);
+    expect(firstItem.reviewRounds[1]).toMatchObject({
+      freeFormResponseMode: "enabled",
+      options: expect.arrayContaining([
+        expect.objectContaining({ intent: "approve_as_is" }),
+        expect.objectContaining({ intent: "request_edit" })
+      ])
+    });
   });
 });

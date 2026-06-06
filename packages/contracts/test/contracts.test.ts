@@ -1,24 +1,33 @@
 import {
   AUDIT_JSONL_CONTRACT,
+  AiDraftUpdateSchema,
   AuditEventSchema,
   ContextEnvelopeSchema,
   LiveActionSchema,
   LiveSessionSpecSchema,
   OverlayStateSchema,
+  PrepGenerationTaskSchema,
+  ProductReviewPlanSchema,
   ProductRecordSchema,
   PromoRecordSchema,
   RuntimeEventSchema,
   SQLITE_SCHEMA,
+  SellerFreeFormReviewResponseSchema,
   SessionMemorySchema,
+  ShopeeCreateProductCommandSchema,
   ViewerMemorySchema,
   badFixtures,
+  validAiDraftUpdate,
   validAuditEvent,
   validLiveAction,
   validLiveSessionSpec,
   validOverlayState,
+  validProductReviewPlan,
   validProducts,
   validPromo,
   validRuntimeEvents,
+  validSellerFreeFormReviewResponse,
+  validShopeeCreateProductCommand,
   validSessionMemory,
   validViewerMemory,
   vintageJewelryLiveSessionSpec,
@@ -37,12 +46,56 @@ describe("contract freeze", () => {
     expect(() => OverlayStateSchema.parse(validOverlayState)).not.toThrow();
     expect(() => ViewerMemorySchema.parse(validViewerMemory)).not.toThrow();
     expect(() => SessionMemorySchema.parse(validSessionMemory)).not.toThrow();
+    expect(() => ProductReviewPlanSchema.parse(validProductReviewPlan)).not.toThrow();
+    expect(() => AiDraftUpdateSchema.parse(validAiDraftUpdate)).not.toThrow();
+    expect(() => SellerFreeFormReviewResponseSchema.parse(validSellerFreeFormReviewResponse)).not.toThrow();
+    expect(() => {
+      validProductReviewPlan.generationTasks.forEach((task) => PrepGenerationTaskSchema.parse(task));
+    }).not.toThrow();
+    expect(() => ShopeeCreateProductCommandSchema.parse(validShopeeCreateProductCommand)).not.toThrow();
   });
 
   it("rejects invalid or private contract payloads", () => {
     expect(() => ProductRecordSchema.parse(badFixtures.negativeStockProduct)).toThrow();
     expect(() => LiveActionSchema.parse(badFixtures.privateLiveActionPayload)).toThrow();
     expect(() => LiveActionSchema.parse(badFixtures.mismatchedActionPayload)).toThrow();
+    expect(() => AiDraftUpdateSchema.parse(badFixtures.aiDraftUpdateChangesLockedPrice)).toThrow();
+    expect(() => ProductReviewPlanSchema.parse(badFixtures.productReviewPlanIdMismatch)).toThrow();
+    expect(() => ProductReviewPlanSchema.parse(badFixtures.editedDecisionWithoutEditedProduct)).toThrow();
+    expect(() => ProductReviewPlanSchema.parse(badFixtures.productReviewPlanWithoutOptions)).toThrow();
+  });
+
+  it("freezes review-to-publish safety contracts", () => {
+    expect(validProductReviewPlan.items[0]?.decision.status).toBe("pending");
+    expect(validProductReviewPlan.items[0]?.aiUpdatableFields).toEqual(
+      expect.arrayContaining(["title", "listingDraft", "sellerGuidance", "photoEnhancementPrompts"])
+    );
+    expect(validProductReviewPlan.items[0]?.lockedStructuredFields).toEqual(
+      expect.arrayContaining(["sku", "price", "stock", "variants", "promoEligibility"])
+    );
+    expect(validProductReviewPlan.items[0]?.reviewRounds[0]).toMatchObject({
+      freeFormResponseMode: "enabled",
+      options: expect.arrayContaining([
+        expect.objectContaining({ intent: "approve_as_is" }),
+        expect.objectContaining({ intent: "request_edit" })
+      ])
+    });
+    expect(validProductReviewPlan.generationTasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: validProducts[0]!.id,
+          taskType: "image_edit",
+          status: "pending"
+        })
+      ])
+    );
+    expect(validShopeeCreateProductCommand).toMatchObject({
+      kind: "create_product",
+      approvalStatus: "approved",
+      productId: validProducts[0]!.id
+    });
+    expect(validShopeeCreateProductCommand.payload.product.price).toBe(validProducts[0]!.price);
+    expect(validShopeeCreateProductCommand.payload.product.stock).toBe(validProducts[0]!.stock);
   });
 
   it("validates a context envelope assembled by another lane", () => {
@@ -68,6 +121,7 @@ describe("contract freeze", () => {
 
   it("declares the local storage and immutable audit contracts", () => {
     expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS products");
+    expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS product_review_plans");
     expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS approvals");
     expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS commands");
     expect(AUDIT_JSONL_CONTRACT.filePattern).toBe("audit/{sessionId}.jsonl");

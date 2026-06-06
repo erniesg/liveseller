@@ -2,13 +2,23 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  type AiDraftUpdate,
   type EvidenceCitation,
+  type ImageGenerationPlan,
   type LiveSessionSpec,
+  type PrepGenerationTask,
+  type ProductIdentityDraft,
+  type ProductReviewPlan,
   type PolicyPack,
   type ProductRecord,
   type PromoRecord,
+  type SellerGuidance,
+  type SellerUiPolicy,
+  AiDraftUpdateSchema,
   LiveSessionSpecSchema,
+  PrepGenerationTaskSchema,
   PolicyPackSchema,
+  ProductReviewPlanSchema,
   ProductRecordSchema,
   PromoRecordSchema,
   seedCitation,
@@ -18,6 +28,16 @@ import {
   validPromo,
   vintageJewelryLiveSessionSpec,
   vintageJewelryProducts
+} from "@liveseller/contracts";
+
+export type {
+  AiDraftUpdate,
+  ImageGenerationPlan,
+  PrepGenerationTask,
+  ProductIdentityDraft,
+  ProductReviewPlan,
+  SellerGuidance,
+  SellerUiPolicy
 } from "@liveseller/contracts";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -76,70 +96,6 @@ export type IngestedSellerFile = {
   sizeBytes: number;
 };
 
-export type SellerGuidance = {
-  productId: string;
-  talkTrack: string;
-  researchNotes: string[];
-  likelyBuyerQuestions: string[];
-  riskNotes: string[];
-};
-
-export type ImageGenerationPlan = {
-  productId: string;
-  model: "gpt-image-2";
-  sourceImageUris: string[];
-  prompts: string[];
-};
-
-export type ProductIdentityDraft = {
-  productId: string;
-  title: string;
-  sku: string;
-  aliases: string[];
-  category: string;
-  price: number;
-  currency: ProductRecord["currency"];
-  stock: number;
-  variantCount: number;
-  imageCount: number;
-  sourceConfidence: number;
-  identitySource: "structured_fixture";
-  missingFields: string[];
-  evidence: EvidenceCitation[];
-};
-
-export type SellerUiPolicy = {
-  sessionId: string;
-  status: "seller_review_required" | "ready_for_live_review";
-  products: Array<{
-    productId: string;
-    title: string;
-    sku: string;
-    priceLabel: string;
-    stockLabel: string;
-    imageCount: number;
-    missingFields: string[];
-    reviewRequired: boolean;
-  }>;
-  photoEnhancement: Array<{
-    productId: string;
-    model: "gpt-image-2";
-    sourceImageCount: number;
-    promptCount: number;
-    requiresApproval: boolean;
-  }>;
-  publicAutomation: {
-    autoSend: "low_risk_structured_only";
-    approvalRequired: string[];
-    blockedAutoSend: string[];
-  };
-  renderHints: {
-    sidePanelSectionId: "liveseller-prep-review";
-    productAttribute: "data-liveseller-product-id";
-    actionAttribute: "data-liveseller-action-id";
-  };
-};
-
 export type PrepExtractionResult = {
   products: ProductRecord[];
   promos: PromoRecord[];
@@ -157,6 +113,7 @@ export type SellerMaterialIngestionResult = PrepExtractionResult & {
   productIdentityDrafts: ProductIdentityDraft[];
   photoEnhancementPlan: ImageGenerationPlan[];
   sellerUiPolicy: SellerUiPolicy;
+  productReviewPlan: ProductReviewPlan;
 };
 
 const requiredSeedFiles = ["product-notes.md", "policy-notes.md", "promo-notes.csv"];
@@ -507,6 +464,261 @@ export function buildSellerUiPolicy(
   };
 }
 
+const aiUpdatableReviewFields = [
+  "title",
+  "aliases",
+  "category",
+  "description",
+  "listingDraft",
+  "sellerGuidance",
+  "photoEnhancementPrompts"
+] as const;
+
+const lockedStructuredReviewFields = [
+  "sku",
+  "price",
+  "stock",
+  "variants",
+  "shopeeProductId",
+  "promoEligibility"
+] as const;
+
+function buildSellerReviewRound(product: ProductRecord, proposedAt: string) {
+  return {
+    roundId: `round-${product.id}-001`,
+    productId: product.id,
+    proposedAt,
+    prompt:
+      "Review the drafted Shopee listing. Choose an option or reply freely with edits, rejection reasons, or requests for more options.",
+    options: [
+      {
+        optionId: `option-${product.id}-approve`,
+        label: "Approve draft",
+        description: "Use the structured product facts and current listing draft as-is.",
+        intent: "approve_as_is" as const
+      },
+      {
+        optionId: `option-${product.id}-edit`,
+        label: "Request edits",
+        description: "Reply with free-form wording, image, or policy edits before publishing.",
+        intent: "request_edit" as const
+      },
+      {
+        optionId: `option-${product.id}-more-options`,
+        label: "More options",
+        description: "Ask the agent to propose another set of listing or image directions.",
+        intent: "request_more_options" as const
+      }
+    ],
+    freeFormResponseMode: "enabled" as const
+  };
+}
+
+function buildPrepGenerationTasks(product: ProductRecord, generatedAt: string): PrepGenerationTask[] {
+  const completedTaskBase = {
+    productId: product.id,
+    status: "completed" as const,
+    outputRefs: [`review://${product.id}`],
+    dependsOnTaskIds: [],
+    startedAt: generatedAt,
+    completedAt: generatedAt,
+    citations: product.evidence
+  };
+
+  return [
+    PrepGenerationTaskSchema.parse({
+      ...completedTaskBase,
+      taskId: `task-${product.id}-identity-draft`,
+      taskType: "identity_draft",
+      inputRefs: product.evidence.map((citation) => citation.locator)
+    }),
+    PrepGenerationTaskSchema.parse({
+      ...completedTaskBase,
+      taskId: `task-${product.id}-seller-guidance`,
+      taskType: "seller_guidance",
+      inputRefs: [product.id]
+    }),
+    PrepGenerationTaskSchema.parse({
+      ...completedTaskBase,
+      taskId: `task-${product.id}-photo-prompt`,
+      taskType: "photo_prompt",
+      inputRefs: product.media.images.map((image) => image.uri)
+    }),
+    ...product.media.images.map((image) =>
+      PrepGenerationTaskSchema.parse({
+        taskId: `task-${product.id}-image-edit-${image.id}`,
+        productId: product.id,
+        taskType: "image_edit",
+        status: "pending",
+        inputRefs: [image.uri],
+        outputRefs: [],
+        dependsOnTaskIds: [`task-${product.id}-photo-prompt`],
+        citations: image.citations
+      })
+    )
+  ];
+}
+
+export function buildProductReviewPlan(
+  session: LiveSessionSpec,
+  productIdentityDrafts: ProductIdentityDraft[],
+  sellerGuidance: SellerGuidance[],
+  photoEnhancementPlan: ImageGenerationPlan[],
+  sellerUiPolicy: SellerUiPolicy,
+  generatedAt = "2026-06-06T02:00:00.000Z"
+): ProductReviewPlan {
+  const items = session.products.map((product) => {
+    const identityDraft = productIdentityDrafts.find((draft) => draft.productId === product.id);
+    const guidance = sellerGuidance.find((candidate) => candidate.productId === product.id);
+    const photoPlan = photoEnhancementPlan.find((candidate) => candidate.productId === product.id);
+
+    if (!identityDraft || !guidance || !photoPlan) {
+      throw new Error(`Cannot build product review plan without complete draft context for ${product.id}`);
+    }
+
+    return {
+      productId: product.id,
+      product,
+      identityDraft,
+      sellerGuidance: guidance,
+      photoEnhancementPlan: photoPlan,
+      aiUpdatableFields: [...aiUpdatableReviewFields],
+      lockedStructuredFields: [...lockedStructuredReviewFields],
+      draftUpdates: [],
+      reviewRounds: [buildSellerReviewRound(product, generatedAt)],
+      decision: {
+        decisionId: `decision-${product.id}-pending`,
+        productId: product.id,
+        status: "pending" as const,
+        reason: "Seller has not reviewed this product listing draft.",
+        citations: product.evidence
+      }
+    };
+  });
+
+  return ProductReviewPlanSchema.parse({
+    reviewPlanId: `review-${session.sessionId}`,
+    sessionId: session.sessionId,
+    generatedAt,
+    updatedAt: generatedAt,
+    status: "seller_review_required",
+    items,
+    generationTasks: session.products.flatMap((product) => buildPrepGenerationTasks(product, generatedAt)),
+    sellerUiPolicy,
+    citations: session.products.flatMap((product) => product.evidence)
+  });
+}
+
+export type PrepGenerationTaskRunnerResult = {
+  outputRefs: string[];
+  citations?: EvidenceCitation[];
+  error?: string;
+};
+
+export type PrepGenerationTaskRunner = (
+  task: PrepGenerationTask
+) => Promise<PrepGenerationTaskRunnerResult>;
+
+export async function runPendingPrepGenerationTasks(
+  reviewPlan: ProductReviewPlan,
+  runner: PrepGenerationTaskRunner,
+  completedAt = new Date().toISOString()
+): Promise<ProductReviewPlan> {
+  const pendingTasks = reviewPlan.generationTasks.filter((task) => task.status === "pending");
+  const results = await Promise.all(
+    pendingTasks.map(async (task) => {
+      try {
+        const result = await runner({
+          ...task,
+          status: "running",
+          startedAt: completedAt
+        });
+
+        return PrepGenerationTaskSchema.parse({
+          ...task,
+          status: result.error ? "failed" : "completed",
+          startedAt: completedAt,
+          completedAt,
+          outputRefs: result.outputRefs,
+          error: result.error,
+          citations: result.citations ?? task.citations
+        });
+      } catch (error) {
+        return PrepGenerationTaskSchema.parse({
+          ...task,
+          status: "failed",
+          startedAt: completedAt,
+          completedAt,
+          outputRefs: [],
+          error: error instanceof Error ? error.message : "Unknown prep generation task failure"
+        });
+      }
+    })
+  );
+  const byTaskId = new Map(results.map((task) => [task.taskId, task]));
+
+  return ProductReviewPlanSchema.parse({
+    ...reviewPlan,
+    updatedAt: completedAt,
+    generationTasks: reviewPlan.generationTasks.map((task) => byTaskId.get(task.taskId) ?? task)
+  });
+}
+
+export function applyAiDraftUpdate(
+  reviewPlan: ProductReviewPlan,
+  update: AiDraftUpdate
+): ProductReviewPlan {
+  const parsedUpdate = AiDraftUpdateSchema.parse(update);
+  const targetIndex = reviewPlan.items.findIndex((item) => item.productId === parsedUpdate.productId);
+  if (targetIndex === -1) {
+    throw new Error(`Cannot apply AI draft update for unknown product: ${parsedUpdate.productId}`);
+  }
+
+  const items = reviewPlan.items.map((item, index) => {
+    if (index !== targetIndex) {
+      return item;
+    }
+
+    const patch = parsedUpdate.patch;
+    const listingDraft = patch.listingDraft ?? item.product.listingDraft;
+    const product = ProductRecordSchema.parse({
+      ...item.product,
+      title: patch.title ?? item.product.title,
+      aliases: patch.aliases ?? item.product.aliases,
+      category: patch.category ?? item.product.category,
+      description: patch.description ?? item.product.description,
+      listingDraft
+    });
+
+    return {
+      ...item,
+      product,
+      identityDraft: {
+        ...item.identityDraft,
+        title: patch.title ?? item.identityDraft.title,
+        aliases: patch.aliases ?? item.identityDraft.aliases,
+        category: patch.category ?? item.identityDraft.category
+      },
+      sellerGuidance: {
+        ...item.sellerGuidance,
+        ...patch.sellerGuidance,
+        productId: item.productId
+      },
+      photoEnhancementPlan: {
+        ...item.photoEnhancementPlan,
+        prompts: patch.photoEnhancementPrompts ?? item.photoEnhancementPlan.prompts
+      },
+      draftUpdates: [...item.draftUpdates, parsedUpdate]
+    };
+  });
+
+  return ProductReviewPlanSchema.parse({
+    ...reviewPlan,
+    updatedAt: parsedUpdate.updatedAt,
+    items
+  });
+}
+
 export function buildSellerDropFolderExtraction(
   folder = DEFAULT_SELLER_DROP_FOLDER,
   options: SellerDropFolderExtractionOptions = {}
@@ -557,13 +769,22 @@ export function buildSellerMaterialIngestion(
     extraction.missingFieldReport,
     photoEnhancementPlan
   );
+  const productReviewPlan = buildProductReviewPlan(
+    extraction.liveSessionSpec,
+    productIdentityDrafts,
+    extraction.sellerGuidance,
+    photoEnhancementPlan,
+    sellerUiPolicy,
+    extraction.missingFieldReport.generatedAt
+  );
 
   return {
     ...extraction,
     ingestedFiles,
     productIdentityDrafts,
     photoEnhancementPlan,
-    sellerUiPolicy
+    sellerUiPolicy,
+    productReviewPlan
   };
 }
 

@@ -30,6 +30,9 @@
 ## Agent And Automation Decisions
 
 - Backend/runtime owns OpenAI Realtime/session negotiation and model calls.
+- Codex app-server is the preferred integration point for a Codex-native operator console when LiveSeller needs embedded Codex threads, approvals, conversation history, and streamed agent events.
+- Codex app-server does not replace LiveSeller prep contracts: `ProductReviewPlan`, seller review rounds, generation tasks, and Shopee publish commands remain domain payloads in `@liveseller/contracts`.
+- Server-side prep generation can call OpenAI image/text models, but API keys must be supplied through local server secrets or environment configuration, never pasted into chat and never stored in browser clients.
 - Browser clients, overlays, extensions, and content scripts do not store long-lived OpenAI API keys.
 - Real Shopee operation uses the seller's authenticated Chrome tab through extension/content script.
 - Playwright is not the critical path for real Shopee operation.
