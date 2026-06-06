@@ -38,11 +38,11 @@
           </label>
           <label>
             Review session
-            <input id="review-session-id" value="live-seed-001" />
+            <input id="review-session-id" value="live-vintage-jewelry-001" />
           </label>
           <label>
             Livestream session
-            <input id="live-session-id" value="live-seed-001" />
+            <input id="live-session-id" value="live-vintage-jewelry-001" />
           </label>
           <label>
             Shopee Live setup URL
@@ -110,13 +110,16 @@
       </section>
 
       <section id="product-activity-panel" class="panel active-step" data-step="products" aria-label="Product activity log">
-        <div class="section-heading">
-          <div>
-            <h2>Activity</h2>
-            <p>Live progress for generation and Shopee product creation.</p>
-          </div>
-        </div>
-        <div id="product-event-log" class="activity-log">No activity yet.</div>
+        <details class="activity-panel" open>
+          <summary>
+            <span>
+              <strong>Activity</strong>
+              <span>Rolling live log for generation, approval, and Shopee publishing.</span>
+            </span>
+            <span id="product-event-count" class="tag">0</span>
+          </summary>
+          <div id="product-event-log" class="activity-log">No activity yet.</div>
+        </details>
       </section>
 
       <section id="liveseller-prep-review" class="panel active-step" data-step="products" aria-label="Seller material review" aria-live="polite" hidden>
@@ -257,7 +260,7 @@
         </label>
         <label>
           Viewer message
-          <input id="viewer-message" value="How much is the Bamboo Cooling Tee?" />
+          <input id="viewer-message" value="How much is the cameo brooch and can you ship to Singapore?" />
         </label>
         <div class="button-row">
           <button id="send-viewer-message" type="button">Test viewer message</button>
@@ -277,7 +280,7 @@
         </div>
         <label>
           Host caption
-          <textarea id="host-caption" rows="3">这件竹纤维T恤今天直播很适合新加坡天气</textarea>
+          <textarea id="host-caption" rows="3">这枚中古胸针今天直播可以近看珐琅和贝母细节</textarea>
         </label>
         <label>
           Host language

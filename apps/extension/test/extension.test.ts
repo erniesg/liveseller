@@ -510,7 +510,9 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Drag product images here");
     expect(sidePanel).toContain("Generate product plan");
     expect(sidePanel).toContain("Activity");
+    expect(sidePanel).toContain("Rolling live log");
     expect(sidePanel).toContain('id="product-event-log"');
+    expect(sidePanel).toContain('id="product-event-count"');
     expect(sidePanel).toContain("Approve all and create");
     expect(sidePanel).toContain("More options");
     expect(sidePanel).toContain("Load cached plan");
@@ -556,7 +558,13 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("operator_review_plan_created");
     expect(sidePanelScript).toContain("operator_approval_recorded");
     expect(sidePanelScript).toContain("appendProductEvent");
+    expect(sidePanelScript).toContain("productEventFromTimeline");
+    expect(sidePanelScript).toContain("writeCachedPlan");
+    expect(sidePanelScript).toContain("stripLargeCachedValues");
+    expect(sidePanelScript).toContain("setInterval(() => void refreshSellerTimeline().catch(() => undefined), 2000)");
     expect(sidePanelScript).toContain("Approve all complete");
+    expect(sidePanelScript).toContain("Shopee publish queue complete");
+    expect(sidePanelScript).toContain("Livestream product context ready");
     expect(sidePanelScript).toContain("Shopee form filled");
     expect(sidePanelScript).toContain("requestPlanChanges");
     expect(sidePanelScript).toContain("Request changes");

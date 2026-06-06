@@ -24,7 +24,10 @@ const state = {
   realtimeToolCalls: [],
   sellerTimelineEvents: [],
   sellerTimelineRuntimeCursor: 0,
-  sellerTimelineOperatorCursor: 0
+  sellerTimelineOperatorCursor: 0,
+  productEventKeys: new Set(),
+  runtimeLiveSession: undefined,
+  liveEvents: []
 };
 
 let intakeImages = [];
@@ -64,7 +67,7 @@ function operatorOrigin() {
 }
 
 function reviewSessionId() {
-  return $("#review-session-id").value.trim() || "live-seed-001";
+  return $("#review-session-id").value.trim() || "live-vintage-jewelry-001";
 }
 
 function liveSessionId() {
@@ -94,14 +97,32 @@ function writeLog(selector, value) {
   node.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
+function appendLiveEvent(title, detail = "", status = "info", extra = {}) {
+  state.liveEvents.unshift({
+    timestamp: new Date().toISOString(),
+    status,
+    title,
+    detail,
+    ...extra
+  });
+  state.liveEvents = state.liveEvents.slice(0, 30);
+  writeLog("#livestream-log", {
+    events: state.liveEvents
+  });
+}
+
 function renderProductEvents() {
   const root = $("#product-event-log");
+  const count = $("#product-event-count");
+  if (count) {
+    count.textContent = String(state.productEvents.length);
+  }
   root.replaceChildren();
   if (state.productEvents.length === 0) {
     root.textContent = "No activity yet.";
     return;
   }
-  for (const event of state.productEvents.slice(0, 20)) {
+  for (const event of state.productEvents.slice(0, 40)) {
     const row = document.createElement("div");
     row.className = `activity-row ${event.status || "info"}`;
     row.innerHTML = `
@@ -113,14 +134,47 @@ function renderProductEvents() {
   }
 }
 
-function appendProductEvent(title, detail = "", status = "info") {
+function appendProductEvent(title, detail = "", status = "info", options = {}) {
+  if (options.key) {
+    if (state.productEventKeys.has(options.key)) {
+      return;
+    }
+    state.productEventKeys.add(options.key);
+  }
   state.productEvents = [{
     title,
     detail,
     status,
-    timestamp: new Date().toLocaleTimeString()
-  }, ...state.productEvents].slice(0, 40);
+    timestamp: options.timestamp || new Date().toLocaleTimeString()
+  }, ...state.productEvents].slice(0, 80);
   renderProductEvents();
+}
+
+function stripLargeCachedValues(value) {
+  if (typeof value === "string") {
+    if (value.startsWith("data:image/") || value.length > 12000) {
+      return "[omitted-large-value]";
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripLargeCachedValues(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+      key,
+      key === "uri" || key === "dataUrl" ? stripLargeCachedValues(entry) : stripLargeCachedValues(entry)
+    ]));
+  }
+  return value;
+}
+
+function writeCachedPlan(payload) {
+  try {
+    localStorage.setItem(cachedPlanStorageKey, JSON.stringify(stripLargeCachedValues(payload)));
+  } catch (error) {
+    appendProductEvent("Cache skipped", error instanceof Error ? error.message : String(error), "warning");
+  }
 }
 
 function escapeHtml(value) {
@@ -189,6 +243,18 @@ function timelineKey(event) {
   return `${event.service || "unknown"}:${event.id || event.timestamp || Math.random()}`;
 }
 
+function productEventFromTimeline(event, key) {
+  appendProductEvent(
+    event.title || event.kind || "Timeline event",
+    event.detail || event.message || event.tool || "",
+    event.status === "error" || event.status === "failed" ? "error" : event.status === "success" ? "success" : "info",
+    {
+      key: `timeline:${key}`,
+      timestamp: event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : undefined
+    }
+  );
+}
+
 function renderSellerTimeline() {
   const root = $("#seller-timeline-log");
   root.replaceChildren();
@@ -217,8 +283,13 @@ function renderSellerTimeline() {
 
 function mergeTimelineEvents(events) {
   const byKey = new Map(state.sellerTimelineEvents.map((event) => [timelineKey(event), event]));
+  const existingKeys = new Set(byKey.keys());
   for (const event of events || []) {
-    byKey.set(timelineKey(event), event);
+    const key = timelineKey(event);
+    byKey.set(key, event);
+    if (!existingKeys.has(key)) {
+      productEventFromTimeline(event, key);
+    }
   }
   state.sellerTimelineEvents = [...byKey.values()]
     .sort((left, right) => String(left.timestamp || "").localeCompare(String(right.timestamp || "")))
@@ -271,6 +342,11 @@ function publishableProducts() {
   return publishableItems().map((item) => item.decision.editedProduct || item.product);
 }
 
+function liveLineupProducts() {
+  const approvedProducts = publishableProducts();
+  return approvedProducts.length > 0 ? approvedProducts : state.runtimeLiveSession?.products || [];
+}
+
 function resetLiveSessionState() {
   state.liveSessionRegistered = false;
   state.livestreamPrepared = false;
@@ -286,13 +362,16 @@ function renderLiveLineup() {
     return;
   }
   const items = publishableItems();
+  const fallbackProducts = items.length === 0 ? state.runtimeLiveSession?.products || [] : [];
   root.replaceChildren();
-  if (items.length === 0) {
-    root.textContent = "Approve products first.";
+  if (items.length === 0 && fallbackProducts.length === 0) {
+    root.textContent = "No products loaded for this live session yet.";
     return;
   }
-  for (const item of items) {
-    const product = item.decision.editedProduct || item.product;
+  const products = items.length > 0
+    ? items.map((item) => item.decision.editedProduct || item.product)
+    : fallbackProducts;
+  for (const product of products) {
     const image = product.media?.images?.[0];
     const row = document.createElement("article");
     row.className = "lineup-item";
@@ -302,9 +381,27 @@ function renderLiveLineup() {
         <strong>${escapeHtml(product.title)}</strong>
         <span>${escapeHtml(product.currency)} ${Number(product.price).toFixed(2)} · ${escapeHtml(product.stock)} in stock</span>
       </div>
+      <button type="button" data-live-product-id="${escapeHtml(product.id)}">Show</button>
     `;
     root.append(row);
   }
+}
+
+async function showLiveProduct(productId) {
+  const product = liveLineupProducts().find((candidate) => candidate.id === productId);
+  if (!product) {
+    throw new Error(`Unknown live product ${productId}`);
+  }
+  appendLiveEvent("Product overlay requested", product.title, "info", {
+    tool: "show_product_card",
+    productId
+  });
+  await callRealtimeTool("show_product_card", { productId });
+  await callRealtimeTool("prompt_seller_script", { productId });
+  appendLiveEvent("Product overlay changed", product.title, "success", {
+    tool: "show_product_card",
+    productId
+  });
 }
 
 function renderAiOverlaySummary() {
@@ -335,7 +432,7 @@ function renderLivePreview() {
   const previewStatus = $("#live-preview-status");
   const agentStatus = $("#live-agent-status");
   const viewerUrl = sellerViewerUrl();
-  const products = publishableProducts();
+  const products = liveLineupProducts();
   const previewUrl = cameraPreviewUrl();
 
   $("#viewer-url").value = viewerUrl;
@@ -344,27 +441,47 @@ function renderLivePreview() {
     : "Prepare Shopee Live to get the viewer link.";
   agentStatus.textContent = state.realtimeAgentConnected ? "AI listening" : state.liveSessionRegistered ? "AI ready" : "AI idle";
 
+  if (frame.getAttribute("src") !== previewUrl) {
+    frame.setAttribute("src", previewUrl);
+  }
+  frame.hidden = false;
+  placeholder.hidden = true;
   if (products.length === 0) {
-    frame.hidden = true;
-    frame.removeAttribute("src");
-    placeholder.hidden = false;
-    previewStatus.textContent = "Approve products to start the live preview.";
+    previewStatus.textContent = "Camera preview ready. Load a live session or approve products to add overlays.";
     return;
   }
 
   previewStatus.textContent = state.shopeePreview?.rtmpUrlPresent
     ? "Camera preview ready. Stream publisher can send this camera plus overlay feed to Shopee."
     : "Camera preview ready. Capture Shopee preview to connect RTMP.";
-  if (frame.getAttribute("src") !== previewUrl) {
-    frame.setAttribute("src", previewUrl);
+}
+
+async function ensureLiveSessionReady() {
+  if (!state.runtimeLiveSession) {
+    await loadRuntimeLiveSessionSpec();
   }
-  frame.hidden = false;
-  placeholder.hidden = true;
+  await registerApprovedLiveSession();
+}
+
+async function loadRuntimeLiveSessionSpec() {
+  try {
+    state.runtimeLiveSession = await fetchJson(`/api/live-sessions/${encodeURIComponent(liveSessionId())}/spec`);
+  } catch (error) {
+    state.runtimeLiveSession = undefined;
+    writeLog("#livestream-log", {
+      status: "live_session_fixture_unavailable",
+      sessionId: liveSessionId(),
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+  renderLiveLineup();
+  renderLivePreview();
 }
 
 function updateLaunchChecklist() {
+  const hasLiveProducts = liveLineupProducts().length > 0;
   const checks = {
-    "approved-products": allProductsApproved(),
+    "approved-products": allProductsApproved() || hasLiveProducts,
     "create-products": state.createProductExecuted,
     "prepare-live": state.livestreamPrepared,
     "overlay-open": state.overlayOpened,
@@ -380,7 +497,9 @@ function updateLaunchChecklist() {
   }
   $("#public-overlay-url").value = publicOverlayUrl();
   $("#camera-preview-url").value = cameraPreviewUrl();
-  $("#go-live").disabled = !state.shopeePreview?.goLiveVisible;
+  $("#prepare-livestream").disabled = !hasLiveProducts;
+  $("#go-live").disabled = !hasLiveProducts;
+  $("#start-overlay-pipe").disabled = false;
   renderLiveLineup();
   renderLivePreview();
   renderAiOverlaySummary();
@@ -458,15 +577,16 @@ function buildLocalCreateProductCommand(item, decision) {
 }
 
 async function registerApprovedLiveSession() {
-  const products = publishableProducts();
-  if (products.length === 0) {
-    throw new Error("Approve at least one product before starting live preview.");
-  }
   const baseSession = await fetchJson(`/api/live-sessions/${encodeURIComponent(reviewSessionId())}/spec`);
+  const approvedProducts = publishableProducts();
+  const products = approvedProducts.length > 0 ? approvedProducts : baseSession.products || [];
+  if (products.length === 0) {
+    throw new Error("Load a live session or approve at least one product before starting live preview.");
+  }
   const session = {
     ...baseSession,
     sessionId: liveSessionId(),
-    title: `${products[0]?.title || "LiveSeller"} Live`,
+    title: approvedProducts.length > 0 ? `${products[0]?.title || "LiveSeller"} Live` : baseSession.title,
     products,
     promos: (baseSession.promos || []).filter((promo) =>
       promo.eligibleProductIds?.some((productId) => products.some((product) => product.id === productId))
@@ -478,6 +598,7 @@ async function registerApprovedLiveSession() {
     body: JSON.stringify({ session })
   });
   state.liveSessionRegistered = true;
+  state.runtimeLiveSession = session;
   state.startLivestreamCommands = state.startLivestreamCommands.length > 0
     ? state.startLivestreamCommands
     : [{
@@ -493,11 +614,9 @@ async function registerApprovedLiveSession() {
           goLive: false
         }
       }];
-  writeLog("#livestream-log", {
-    status: "live_session_registered",
+  appendLiveEvent("Live session registered", `${registered.productCount} product(s) ready`, "success", {
     sessionId: registered.sessionId,
-    productCount: registered.productCount,
-    overlayUrl: publicOverlayUrl(),
+    publicOverlayUrl: publicOverlayUrl(),
     cameraPreviewUrl: cameraPreviewUrl()
   });
   updateLaunchChecklist();
@@ -752,11 +871,11 @@ function createLocalIntakeReviewDraft(product, draft) {
   state.createProductCommands = [];
   state.startLivestreamCommands = [];
   resetLiveSessionState();
-  localStorage.setItem(cachedPlanStorageKey, JSON.stringify({
+  writeCachedPlan({
     cachedAt: new Date().toISOString(),
     item,
     fields: draft
-  }));
+  });
   renderReviewPlan();
   renderCommands();
   renderLiveLineup();
@@ -799,11 +918,11 @@ async function createIntakeReviewDraft() {
     state.createProductCommands = response.createProductCommands || [];
     state.startLivestreamCommands = response.startLivestreamCommands || [];
     resetLiveSessionState();
-    localStorage.setItem(cachedPlanStorageKey, JSON.stringify({
+    writeCachedPlan({
       cachedAt: new Date().toISOString(),
       reviewPlan: state.reviewPlan,
       source: "operator"
-    }));
+    });
     renderReviewPlan();
     renderCommands();
     renderLiveLineup();
@@ -899,7 +1018,7 @@ function renderCommands() {
   $("#queue-shopee-product-creation").disabled = state.createProductCommands.length === 0;
   $("#confirm-shopee-product-publish").disabled = !state.productCreationFilled;
   $("#prepare-livestream").disabled = publishableProducts().length === 0;
-  $("#start-overlay-pipe").disabled = publishableProducts().length === 0;
+  $("#start-overlay-pipe").disabled = false;
   updateLaunchChecklist();
   writeLog("#command-log", {
     createProductCommands: state.createProductCommands.map((command) => ({
@@ -1003,7 +1122,7 @@ async function submitDecision(card, item, status) {
       productId: decision.productId
     });
     appendProductEvent("Product approved", `${decision.productId}; ${state.createProductCommands.length} create command(s) ready.`, "success");
-    void queueShopeeProductCreation({ autoSubmit: true }).catch((error) => writeLog("#product-creation-log", error.message));
+    void queueShopeeProductCreation({ autoSubmit: true, prepareLive: true }).catch((error) => writeLog("#product-creation-log", error.message));
     return;
   }
 
@@ -1023,7 +1142,7 @@ async function submitDecision(card, item, status) {
   renderReviewPlan();
   renderCommands();
   if (decision.status === "approved" || decision.status === "edited") {
-    void queueShopeeProductCreation({ autoSubmit: true }).catch((error) => writeLog("#product-creation-log", error.message));
+    void queueShopeeProductCreation({ autoSubmit: true, prepareLive: true }).catch((error) => writeLog("#product-creation-log", error.message));
   }
 }
 
@@ -1070,7 +1189,7 @@ async function approveAll() {
     renderReviewPlan();
     renderCommands();
     appendProductEvent("Approve all complete", `${state.createProductCommands.length} Shopee create command(s) ready.`, "success");
-    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true });
+    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: true });
     return;
   }
 
@@ -1419,12 +1538,11 @@ function executeCreateProducts() {
 async function prepareLivestream() {
   $("#prepare-livestream").disabled = true;
   $("#prepare-livestream").textContent = "Preparing...";
+  appendLiveEvent("Prepare live started", "Loading products, overlay, Shopee preview, and voice copilot.", "info");
   try {
-    await registerApprovedLiveSession();
+    await ensureLiveSessionReady();
   } catch (error) {
-    writeLog("#livestream-log", {
-      status: "live_session_registration_failed",
-      error: error instanceof Error ? error.message : String(error),
+    appendLiveEvent("Live session registration failed", error instanceof Error ? error.message : String(error), "error", {
       note: "Restart the runtime server with live-session registration support and retry."
     });
   }
@@ -1432,8 +1550,7 @@ async function prepareLivestream() {
   state.overlayOpened = true;
   updateLaunchChecklist();
   renderLivePreview();
-  writeLog("#livestream-log", {
-    status: "seller_preview_ready",
+  appendLiveEvent("Seller preview ready", "Camera compositor and public overlay URLs are ready.", "success", {
     cameraPreviewUrl: cameraPreviewUrl(),
     publicOverlayUrl: publicOverlayUrl(),
     evidence: state.startLivestreamCommands.map((command) => ({
@@ -1450,36 +1567,35 @@ async function prepareLivestream() {
   try {
     await aiPrepareShopeePreview();
   } catch (error) {
-    writeLog("#livestream-log", {
-      status: "seller_preview_ready_shopee_capture_pending",
-      cameraPreviewUrl: cameraPreviewUrl(),
-      error: error instanceof Error ? error.message : String(error)
+    appendLiveEvent("Shopee preview capture pending", error instanceof Error ? error.message : String(error), "warning", {
+      cameraPreviewUrl: cameraPreviewUrl()
     });
   }
   try {
     await startRealtimeAgent();
   } catch (error) {
-    writeLog("#realtime-log", error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    appendLiveEvent("Realtime voice copilot not connected", message, "warning");
+    writeLog("#realtime-log", message);
   }
   $("#prepare-livestream").textContent = "Prepare live";
-  $("#prepare-livestream").disabled = publishableProducts().length === 0;
+  $("#prepare-livestream").disabled = liveLineupProducts().length === 0;
   void refreshSellerTimeline().catch(() => undefined);
 }
 
 async function aiPrepareShopeePreview() {
   if (!globalThis.chrome?.runtime?.sendMessage) {
-    writeLog("#livestream-log", "Chrome extension runtime is required for Shopee UI automation.");
+    appendLiveEvent("Shopee preview capture unavailable", "Chrome extension runtime is required for Shopee UI automation.", "warning");
     return;
   }
 
+  appendLiveEvent("Shopee preview capture started", "Extension is looking for preview URL plus RTMP URL/key.", "info");
   const response = await chrome.runtime.sendMessage({ type: "liveseller:prepare-shopee-test-preview" });
   if (!response?.ok) {
     state.shopeePreview = undefined;
     $("#start-overlay-pipe").disabled = true;
     updateLaunchChecklist();
-    writeLog("#livestream-log", {
-      status: "shopee_preview_not_ready",
-      error: response?.error,
+    appendLiveEvent("Shopee preview not ready", response?.error || response?.status || "Preview credentials not found yet.", "warning", {
       previewUrl: response?.previewUrl,
       rtmpUrlPresent: Boolean(response?.rtmpUrlPresent),
       rtmpKeyPresent: Boolean(response?.rtmpKeyPresent),
@@ -1494,8 +1610,7 @@ async function aiPrepareShopeePreview() {
   state.overlayPipeStarted = false;
   $("#start-overlay-pipe").disabled = false;
   updateLaunchChecklist();
-  writeLog("#livestream-log", {
-    status: "shopee_test_preview_ready",
+  appendLiveEvent("Shopee preview ready", "RTMP URL/key captured and redacted in logs.", "success", {
     previewUrl: response.previewUrl,
     rtmpUrlPresent: Boolean(response.rtmpUrlPresent),
     rtmpKeyPresent: Boolean(response.rtmpKeyPresent),
@@ -1508,7 +1623,7 @@ async function aiPrepareShopeePreview() {
 async function startOverlayPreviewPipe() {
   if (!state.shopeePreview?.rtmpUrl || !state.shopeePreview?.rtmpKey) {
     if (!state.liveSessionRegistered) {
-      await registerApprovedLiveSession();
+      await ensureLiveSessionReady();
     }
     state.overlayPipeStarted = false;
     renderLivePreview();
@@ -1521,6 +1636,10 @@ async function startOverlayPreviewPipe() {
     });
     return;
   }
+  appendLiveEvent("Stream publisher starting", "Runtime compositor will pipe camera plus overlay to Shopee RTMP.", "info", {
+    rtmpUrl: "present_redacted",
+    rtmpKey: "present_redacted"
+  });
   const response = await fetchJson("/api/shopee/runtime-compositor/start", {
     method: "POST",
     body: JSON.stringify({
@@ -1540,6 +1659,11 @@ async function startOverlayPreviewPipe() {
     previewUrl: state.shopeePreview.previewUrl,
     sellerPreviewUrl: cameraPreviewUrl(),
     goLivePressed: false
+  });
+  appendLiveEvent("Stream publisher started", "Camera plus overlay is being sent to Shopee preview.", "success", {
+    rtmpUrl: "present_redacted",
+    rtmpKey: "present_redacted",
+    sellerPreviewUrl: cameraPreviewUrl()
   });
   void refreshSellerTimeline().catch(() => undefined);
   await refreshCameraStatus();
@@ -1591,6 +1715,14 @@ async function callRealtimeTool(name, args) {
       result.overlayState?.productCard?.title ||
       "Applied by runtime."
   });
+  appendLiveEvent("Realtime tool called", result.scriptSuggestion?.script ||
+    result.routed?.actions?.[0]?.reason ||
+    result.overlayState?.background?.label ||
+    result.overlayState?.productCard?.title ||
+    "Applied by runtime.", "success", {
+    tool: result.tool || name,
+    arguments: args
+  });
   if (result.routed?.actions) {
     state.latestActions = result.routed.actions;
     renderSuggestions(state.latestActions);
@@ -1602,9 +1734,9 @@ async function callRealtimeTool(name, args) {
 
 async function applyOverlayBackground() {
   if (!state.liveSessionRegistered) {
-    await registerApprovedLiveSession();
+    await ensureLiveSessionReady();
   }
-  const product = publishableProducts()[0];
+  const product = liveLineupProducts()[0];
   const response = await callRealtimeTool("show_overlay_background", {
     mode: "solid",
     value: "#ee4d2d",
@@ -1685,7 +1817,10 @@ async function queueShopeeProductCreation(options = {}) {
       result: response
     });
     if (response?.ok && options.autoSubmit) {
-      await confirmShopeeProductPublish({ continueQueue: options.continueQueue === true });
+      await confirmShopeeProductPublish({
+        continueQueue: options.continueQueue === true,
+        prepareLive: options.prepareLive === true
+      });
     }
     void refreshSellerTimeline().catch(() => undefined);
     return;
@@ -1745,14 +1880,45 @@ async function confirmShopeeProductPublish(options = {}) {
     response?.ok ? "success" : "error"
   );
   if (response?.ok && options.continueQueue && state.createProductCommands.length > 0) {
-    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true });
+    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: options.prepareLive === true });
+  } else if (response?.ok && options.prepareLive) {
+    appendProductEvent("Shopee publish queue complete", "Registering approved products for livestream context.", "success");
+    try {
+      await registerApprovedLiveSession();
+      appendProductEvent("Livestream product context ready", `${liveLineupProducts().length} product(s) loaded for overlays and scripts.`, "success");
+    } catch (error) {
+      appendProductEvent("Livestream context pending", error instanceof Error ? error.message : String(error), "warning");
+    }
   }
   void refreshSellerTimeline().catch(() => undefined);
 }
 
 async function confirmShopeeGoLive() {
+  appendLiveEvent("Go Live requested", "Preparing preview, publisher, realtime agent, then clicking Shopee Go Live when available.", "info");
+  if (!state.livestreamPrepared) {
+    await prepareLivestream();
+  } else if (!state.liveSessionRegistered) {
+    await ensureLiveSessionReady();
+  }
+
+  if (!state.shopeePreview?.rtmpUrlPresent) {
+    await aiPrepareShopeePreview();
+  }
+
+  if (state.shopeePreview?.rtmpUrl && state.shopeePreview?.rtmpKey && !state.overlayPipeStarted) {
+    await startOverlayPreviewPipe();
+  }
+
+  if (!state.realtimeAgentConnected) {
+    await startRealtimeAgent().catch((error) => {
+      appendLiveEvent("Realtime voice copilot not connected", error instanceof Error ? error.message : String(error), "warning");
+    });
+  }
+
   if (!globalThis.chrome?.runtime?.sendMessage) {
-    writeLog("#livestream-log", "Chrome extension runtime is required to press Shopee Go Live.");
+    appendLiveEvent("Shopee Go Live click unavailable", "Chrome extension runtime is required to press Shopee Go Live.", "warning", {
+      viewerUrl: state.viewerUrl || state.shopeePreview?.previewUrl || "pending_from_shopee"
+    });
     return;
   }
   const response = await chrome.runtime.sendMessage({
@@ -1763,8 +1929,7 @@ async function confirmShopeeGoLive() {
     state.viewerUrl = $("#shopee-live-url").value.trim();
   }
   renderLivePreview();
-  writeLog("#livestream-log", {
-    status: response?.ok ? "confirmed_go_live_clicked" : "go_live_not_clicked",
+  appendLiveEvent(response?.ok ? "Shopee Go Live clicked" : "Shopee Go Live not clicked", response?.status || response?.error || "Shopee button not available yet.", response?.ok ? "success" : "warning", {
     viewerUrl: state.viewerUrl || "pending_from_shopee",
     result: response
   });
@@ -1886,7 +2051,10 @@ async function operatorBuildCreateProducts() {
 
 $("#load-review-plan").addEventListener("click", () => void loadReviewPlan().catch((error) => writeLog("#review-status", error.message)));
 $("#toggle-settings").addEventListener("click", toggleSettingsPanel);
-$("#approve-all").addEventListener("click", () => void approveAll().catch((error) => writeLog("#command-log", error.message)));
+$("#approve-all").addEventListener("click", () => void approveAll().catch((error) => {
+  appendProductEvent("Approve all failed", error instanceof Error ? error.message : String(error), "error");
+  writeLog("#command-log", error instanceof Error ? error.message : String(error));
+}));
 $("#intake-file-input").addEventListener("change", (event) => addIntakeFiles(event.target.files || []));
 $("#intake-dropzone").addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -1901,6 +2069,15 @@ $("#intake-dropzone").addEventListener("drop", (event) => {
 $("#create-intake-review").addEventListener("click", createIntakeReviewDraft);
 $("#load-cached-plan").addEventListener("click", loadCachedPlan);
 $("#clear-intake").addEventListener("click", clearIntake);
+$("#live-product-lineup").addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-live-product-id]") : undefined;
+  const productId = button?.getAttribute("data-live-product-id");
+  if (productId) {
+    void showLiveProduct(productId).catch((error) => appendLiveEvent("Product overlay failed", error.message, "error", {
+      productId
+    }));
+  }
+});
 $("#execute-create-products").addEventListener("click", executeCreateProducts);
 $("#prepare-livestream").addEventListener("click", () => void prepareLivestream().catch((error) => writeLog("#livestream-log", error.message)));
 $("#ai-prepare-shopee-preview").addEventListener("click", () => void aiPrepareShopeePreview().catch((error) => writeLog("#livestream-log", error.message)));
@@ -1927,12 +2104,17 @@ $("#refresh-seller-timeline").addEventListener("click", () => void refreshSeller
 $("#request-codex-operator").addEventListener("click", () => void requestCodexOperator().catch((error) => writeLog("#operator-result-log", error.message)));
 $("#operator-generate-images").addEventListener("click", () => void operatorGenerateImages().catch((error) => writeLog("#operator-result-log", error.message)));
 $("#operator-build-create-products").addEventListener("click", () => void operatorBuildCreateProducts().catch((error) => writeLog("#operator-result-log", error.message)));
+$("#live-session-id").addEventListener("change", () => void loadRuntimeLiveSessionSpec());
+$("#review-session-id").addEventListener("change", () => void loadRuntimeLiveSessionSpec());
+$("#runtime-origin").addEventListener("change", () => void loadRuntimeLiveSessionSpec());
 document.querySelectorAll("[data-step-target]").forEach((button) => {
   button.addEventListener("click", () => setActiveStep(button.getAttribute("data-step-target")));
 });
 
 void checkRuntime().catch(() => undefined);
 setInterval(() => void checkRuntime().catch(() => undefined), 5000);
+setInterval(() => void refreshSellerTimeline().catch(() => undefined), 2000);
+void loadRuntimeLiveSessionSpec();
 void refreshSellerTimeline().catch(() => undefined);
 renderIntake();
 updateLaunchChecklist();
