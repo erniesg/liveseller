@@ -3,6 +3,7 @@ import {
   ProductReviewDecisionSchema,
   ProductReviewPlanSchema,
   RuntimeEventSchema,
+  validProductReviewPlan,
   validLiveSessionSpec,
   vintageJewelryLiveSessionSpec
 } from "@liveseller/contracts";
@@ -101,6 +102,16 @@ export function createRuntimeServer() {
 
       if (req.method === "GET" && req.url === "/health") {
         sendJson(res, 200, { ok: true, service: "@liveseller/runtime" });
+        return;
+      }
+
+      const reviewPlanSessionId = sessionIdFromUrl(req.url, /^\/api\/prep\/review-plan\/([^/]+)$/u);
+      if (req.method === "GET" && reviewPlanSessionId) {
+        if (reviewPlanSessionId !== validProductReviewPlan.sessionId) {
+          sendJson(res, 404, { error: "review_plan_not_found" });
+          return;
+        }
+        sendJson(res, 200, validProductReviewPlan);
         return;
       }
 

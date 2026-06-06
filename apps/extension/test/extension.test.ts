@@ -401,10 +401,15 @@ describe("Shopee extension command safety", () => {
   it("keeps OpenAI keys out of extension manifest", () => {
     const manifest = readFileSync(join(repoRoot, "apps/extension/manifest.json"), "utf8");
     expect(manifest).not.toMatch(/OPENAI|sk-/i);
+    expect(manifest).toContain('"service_worker": "background.js"');
+    expect(manifest).toContain('"contentScript.js"');
   });
 
   it("ships a side-panel mount point for Codex operator events", () => {
     const sidePanel = readFileSync(join(repoRoot, "apps/extension/sidepanel.html"), "utf8");
+    const sidePanelScript = readFileSync(join(repoRoot, "apps/extension/sidepanel.js"), "utf8");
+    const background = readFileSync(join(repoRoot, "apps/extension/background.js"), "utf8");
+    const contentScript = readFileSync(join(repoRoot, "apps/extension/contentScript.js"), "utf8");
 
     expect(sidePanel).toContain('id="liveseller-codex-operator"');
     expect(sidePanel).toContain("Codex operator");
@@ -412,6 +417,14 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Prepare livestream");
     expect(sidePanel).toContain("Go Live in Shopee Seller Centre");
     expect(sidePanel).toContain("does not press Go Live");
-    expect(sidePanel).not.toMatch(/OPENAI|sk-/i);
+    expect(sidePanel).toContain('script src="sidepanel.js"');
+    expect(sidePanelScript).toContain("/api/prep/review-plan/");
+    expect(sidePanelScript).toContain("/api/prep/review-decisions");
+    expect(sidePanelScript).toContain("/api/runtime/events");
+    expect(sidePanelScript).toContain("/api/runtime/realtime/session");
+    expect(sidePanelScript).toContain("present_redacted");
+    expect(background).toContain("liveseller:lastViewerMessage");
+    expect(contentScript).toContain("data-viewer-id");
+    expect(`${sidePanel}\n${sidePanelScript}\n${background}\n${contentScript}`).not.toMatch(/OPENAI_API_KEY|sk-/i);
   });
 });

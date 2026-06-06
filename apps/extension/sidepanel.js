@@ -1,0 +1,402 @@
+const $ = (selector) => document.querySelector(selector);
+
+const state = {
+  reviewPlan: undefined,
+  createProductCommands: [],
+  startLivestreamCommands: [],
+  latestActions: [],
+  capturedMessage: undefined
+};
+
+function runtimeOrigin() {
+  return $("#runtime-origin").value.trim().replace(/\/$/u, "") || "http://127.0.0.1:8787";
+}
+
+function reviewSessionId() {
+  return $("#review-session-id").value.trim() || "live-seed-001";
+}
+
+function liveSessionId() {
+  return $("#live-session-id").value.trim() || reviewSessionId();
+}
+
+function setConnection(label, kind = "") {
+  const node = $("#connection");
+  node.textContent = label;
+  node.className = `status ${kind}`.trim();
+}
+
+function writeLog(selector, value) {
+  const node = $(selector);
+  node.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+async function fetchJson(path, options = {}) {
+  const response = await fetch(`${runtimeOrigin()}${path}`, {
+    headers: { "content-type": "application/json", ...(options.headers || {}) },
+    ...options
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.message || body.error || `HTTP ${response.status}`);
+  }
+  return body;
+}
+
+async function checkRuntime() {
+  try {
+    await fetchJson("/health");
+    setConnection("Runtime live", "live");
+  } catch (error) {
+    setConnection("Runtime offline", "error");
+    throw error;
+  }
+}
+
+function currentItems() {
+  return state.reviewPlan?.items || [];
+}
+
+function productFromCard(card, item) {
+  const product = structuredClone(item.product);
+  product.title = card.querySelector("[data-field='title']").value.trim() || product.title;
+  product.description = card.querySelector("[data-field='description']").value.trim() || product.description;
+  product.category = card.querySelector("[data-field='category']").value.trim() || product.category;
+  product.price = Number(card.querySelector("[data-field='price']").value || product.price);
+  product.stock = Number.parseInt(card.querySelector("[data-field='stock']").value || product.stock, 10);
+  return product;
+}
+
+function hasProductEdits(product, item) {
+  return JSON.stringify({
+    title: product.title,
+    description: product.description,
+    category: product.category,
+    price: product.price,
+    stock: product.stock
+  }) !== JSON.stringify({
+    title: item.product.title,
+    description: item.product.description,
+    category: item.product.category,
+    price: item.product.price,
+    stock: item.product.stock
+  });
+}
+
+function buildDecision(card, item, status) {
+  const decidedAt = new Date().toISOString();
+  if (status === "rejected") {
+    return {
+      decisionId: `decision-${item.productId}-rejected-${Date.parse(decidedAt)}`,
+      productId: item.productId,
+      status,
+      decidedBy: "seller",
+      decidedAt,
+      reason: "Seller rejected this product from the Chrome side panel.",
+      citations: item.product.evidence
+    };
+  }
+
+  const editedProduct = productFromCard(card, item);
+  const edited = hasProductEdits(editedProduct, item);
+  return {
+    decisionId: `decision-${item.productId}-${edited ? "edited" : "approved"}-${Date.parse(decidedAt)}`,
+    productId: item.productId,
+    status: edited ? "edited" : "approved",
+    decidedBy: "seller",
+    decidedAt,
+    reason: edited
+      ? "Seller edited and approved this product from the Chrome side panel."
+      : "Seller approved this product from the Chrome side panel.",
+    editedProduct: edited ? editedProduct : undefined,
+    citations: item.product.evidence
+  };
+}
+
+function renderReviewPlan() {
+  const items = currentItems();
+  $("#review-status").textContent = state.reviewPlan
+    ? `${state.reviewPlan.status} - ${items.length} products`
+    : "No review plan loaded.";
+  $("#approve-all").disabled = !state.reviewPlan;
+  const root = $("#review-items");
+  root.replaceChildren();
+
+  for (const item of items) {
+    const card = document.createElement("article");
+    card.className = `product-card ${item.decision.status}`;
+    card.dataset.productId = item.productId;
+    card.innerHTML = `
+      <div>
+        <span class="tag">${escapeHtml(item.decision.status)}</span>
+        <h3>${escapeHtml(item.product.title)}</h3>
+      </div>
+      <div class="product-grid">
+        <label>Title <input data-field="title" value="${escapeHtml(item.product.title)}" /></label>
+        <label>Category <input data-field="category" value="${escapeHtml(item.product.category)}" /></label>
+        <label>Price <input data-field="price" type="number" step="0.01" value="${escapeHtml(item.product.price)}" /></label>
+        <label>Stock <input data-field="stock" type="number" value="${escapeHtml(item.product.stock)}" /></label>
+      </div>
+      <label>Description <textarea data-field="description" rows="3">${escapeHtml(item.product.description)}</textarea></label>
+      <div class="button-row">
+        <button data-action="approve" type="button">Approve or save edit</button>
+        <button data-action="reject" type="button">Reject</button>
+      </div>
+    `;
+    card.querySelector("[data-action='approve']").addEventListener("click", () =>
+      void submitDecision(card, item, "approved")
+    );
+    card.querySelector("[data-action='reject']").addEventListener("click", () =>
+      void submitDecision(card, item, "rejected")
+    );
+    root.append(card);
+  }
+}
+
+function renderCommands() {
+  $("#execute-create-products").disabled = state.createProductCommands.length === 0;
+  $("#prepare-livestream").disabled = state.startLivestreamCommands.length === 0;
+  writeLog("#command-log", {
+    createProductCommands: state.createProductCommands.map((command) => ({
+      commandId: command.commandId,
+      productId: command.productId,
+      approvalStatus: command.approvalStatus,
+      kind: command.kind
+    }))
+  });
+  writeLog("#livestream-log", {
+    startLivestreamCommands: state.startLivestreamCommands.map((command) => ({
+      commandId: command.commandId,
+      kind: command.kind,
+      safetyMode: command.safetyMode,
+      credentialEvidence: command.payload.credentialEvidence,
+      goLive: command.payload.goLive
+    }))
+  });
+}
+
+async function loadReviewPlan() {
+  await checkRuntime();
+  state.reviewPlan = await fetchJson(`/api/prep/review-plan/${encodeURIComponent(reviewSessionId())}`);
+  state.createProductCommands = [];
+  state.startLivestreamCommands = [];
+  renderReviewPlan();
+  renderCommands();
+}
+
+async function submitDecision(card, item, status) {
+  const decision = buildDecision(card, item, status);
+  const response = await fetchJson("/api/prep/review-decisions", {
+    method: "POST",
+    body: JSON.stringify({
+      reviewPlan: state.reviewPlan,
+      decision
+    })
+  });
+  state.reviewPlan = response.reviewPlan;
+  state.createProductCommands = response.createProductCommands || [];
+  state.startLivestreamCommands = response.startLivestreamCommands || [];
+  renderReviewPlan();
+  renderCommands();
+}
+
+async function approveAll() {
+  for (const item of [...currentItems()]) {
+    const latest = currentItems().find((candidate) => candidate.productId === item.productId);
+    if (!latest || latest.decision.status === "approved" || latest.decision.status === "edited") {
+      continue;
+    }
+    const card = document.querySelector(`[data-product-id="${latest.productId}"]`);
+    await submitDecision(card, latest, "approved");
+  }
+}
+
+function actionCue(action) {
+  if (action.type === "send_reply" && action.risk === "low" && !action.requiresApproval) {
+    return "Say this";
+  }
+  if (action.requiresApproval || action.type === "request_approval") {
+    return "Needs approval";
+  }
+  if (action.type === "escalate") {
+    return "Escalate";
+  }
+  return "Runtime cue";
+}
+
+function actionText(action) {
+  return action.payload?.text ||
+    action.payload?.prompt ||
+    action.payload?.proposedPublicText ||
+    action.payload?.sellerMessage ||
+    action.payload?.suggestedScript ||
+    action.reason;
+}
+
+function renderSuggestions(actions) {
+  const root = $("#suggestion-log");
+  root.replaceChildren();
+  const sellerActions = actions.filter((action) =>
+    ["send_reply", "draft_reply", "request_approval", "escalate"].includes(action.type)
+  );
+  if (sellerActions.length === 0) {
+    root.textContent = "No seller suggestion returned.";
+    return;
+  }
+  for (const action of sellerActions) {
+    const card = document.createElement("article");
+    card.className = "suggestion-card";
+    card.innerHTML = `
+      <span class="tag">${escapeHtml(actionCue(action))}</span>
+      <strong>${escapeHtml(actionText(action))}</strong>
+      <p>${escapeHtml(action.type)} - ${escapeHtml(action.risk)} - ${action.requiresApproval ? "approval required" : "auto eligible"}</p>
+      <p>${escapeHtml(action.reason)}</p>
+    `;
+    root.append(card);
+  }
+}
+
+async function postRuntimeEvent(event) {
+  const response = await fetchJson("/api/runtime/events", {
+    method: "POST",
+    body: JSON.stringify(event)
+  });
+  state.latestActions = response.actions || [];
+  renderSuggestions(state.latestActions);
+  return response;
+}
+
+async function sendViewerMessage() {
+  await postRuntimeEvent({
+    eventId: `sidepanel-viewer-${Date.now()}`,
+    sessionId: liveSessionId(),
+    timestamp: new Date().toISOString(),
+    source: "viewer",
+    type: "viewer_chat",
+    payload: {
+      viewerId: "sidepanel-viewer",
+      viewerName: $("#viewer-name").value.trim() || "Test Buyer",
+      text: $("#viewer-message").value.trim() || "How much?",
+      language: "en"
+    }
+  });
+}
+
+async function sendHostCaption() {
+  await postRuntimeEvent({
+    eventId: `sidepanel-host-${Date.now()}`,
+    sessionId: liveSessionId(),
+    timestamp: new Date().toISOString(),
+    source: "host",
+    type: "host_transcript",
+    payload: {
+      text: $("#host-caption").value.trim(),
+      language: $("#host-language").value,
+      confidence: 0.95
+    }
+  });
+}
+
+async function requestRealtimeSession() {
+  try {
+    const session = await fetchJson("/api/runtime/realtime/session", { method: "POST", body: "{}" });
+    writeLog("#realtime-log", {
+      status: "ephemeral_client_secret_received",
+      clientSecretPresent: !!session.client_secret,
+      note: "Use this only in the seller-private side panel or seller console."
+    });
+  } catch (error) {
+    writeLog("#realtime-log", error.message);
+  }
+}
+
+function openPublicOverlay() {
+  const url = `http://127.0.0.1:5180/?runtimeOrigin=${encodeURIComponent(runtimeOrigin())}&sessionId=${encodeURIComponent(liveSessionId())}`;
+  if (globalThis.chrome?.tabs) {
+    chrome.tabs.create({ url });
+  } else {
+    window.open(url, "_blank", "noopener");
+  }
+}
+
+function executeCreateProducts() {
+  writeLog("#command-log", {
+    status: "ready_for_authenticated_tab_execution",
+    commands: state.createProductCommands.map((command) => command.commandId),
+    note: "Real Shopee product creation remains content-script authenticated-tab work."
+  });
+}
+
+function prepareLivestream() {
+  writeLog("#livestream-log", {
+    status: "prepared_dry_run",
+    evidence: state.startLivestreamCommands.map((command) => ({
+      commandId: command.commandId,
+      liveSessionCreated: true,
+      credentialEvidence: {
+        serverUrl: "present_redacted",
+        secretToken: "present_redacted"
+      },
+      publicOverlayReady: true,
+      goLivePressed: false
+    }))
+  });
+}
+
+async function useCapturedMessage() {
+  const stored = await globalThis.chrome?.storage?.session?.get("liveseller:lastViewerMessage");
+  const message = stored?.["liveseller:lastViewerMessage"];
+  if (!message) {
+    writeLog("#suggestion-log", "No captured Shopee viewer message in extension storage.");
+    return;
+  }
+  $("#viewer-name").value = message.viewerName || "Shopee Viewer";
+  $("#viewer-message").value = message.text || "";
+  await sendViewerMessage();
+}
+
+function renderCodexEvents() {
+  try {
+    const payload = JSON.parse($("#codex-events-json").value || "{}");
+    const events = Array.isArray(payload.events) ? payload.events : [];
+    const root = $("#codex-event-log");
+    root.replaceChildren();
+    for (const event of events) {
+      const card = document.createElement("article");
+      card.className = "suggestion-card";
+      card.innerHTML = `
+        <strong>${escapeHtml(event.type || "event")} ${event.tool ? `- ${escapeHtml(event.tool)}` : ""}</strong>
+        <p>${escapeHtml(event.message || "")}</p>
+        <p>${escapeHtml(event.timestamp || "")}</p>
+      `;
+      root.append(card);
+    }
+    if (events.length === 0) {
+      root.textContent = "No events in JSON payload.";
+    }
+  } catch (error) {
+    writeLog("#codex-event-log", error.message);
+  }
+}
+
+$("#load-review-plan").addEventListener("click", () => void loadReviewPlan().catch((error) => writeLog("#review-status", error.message)));
+$("#approve-all").addEventListener("click", () => void approveAll().catch((error) => writeLog("#command-log", error.message)));
+$("#execute-create-products").addEventListener("click", executeCreateProducts);
+$("#prepare-livestream").addEventListener("click", prepareLivestream);
+$("#open-public-overlay").addEventListener("click", openPublicOverlay);
+$("#send-viewer-message").addEventListener("click", () => void sendViewerMessage().catch((error) => writeLog("#suggestion-log", error.message)));
+$("#send-host-caption").addEventListener("click", () => void sendHostCaption().catch((error) => writeLog("#realtime-log", error.message)));
+$("#request-realtime-session").addEventListener("click", () => void requestRealtimeSession());
+$("#use-captured-message").addEventListener("click", () => void useCapturedMessage());
+$("#render-codex-events").addEventListener("click", renderCodexEvents);
+
+void checkRuntime().catch(() => undefined);

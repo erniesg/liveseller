@@ -464,6 +464,31 @@ describe("live brain policy runtime", () => {
     }
   });
 
+  it("serves a product review plan for the Chrome side panel", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/prep/review-plan/${validProductReviewPlan.sessionId}`
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.reviewPlanId).toBe(validProductReviewPlan.reviewPlanId);
+      expect(body.items).toHaveLength(validProductReviewPlan.items.length);
+      expect(body.status).toBe("seller_review_required");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
   it("sets CORS headers for local seller UI and overlay clients", async () => {
     const server = createRuntimeServer();
     await new Promise<void>((resolve) => server.listen(0, resolve));

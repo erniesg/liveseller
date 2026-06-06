@@ -17,7 +17,7 @@
     "https://*.shopee.vn/*"
   ],
   "background": {
-    "service_worker": "dist/background.js",
+    "service_worker": "background.js",
     "type": "module"
   },
   "content_scripts": [
@@ -31,7 +31,7 @@
         "https://*.shopee.vn/*"
       ],
       "js": [
-        "dist/contentScript.js"
+        "contentScript.js"
       ],
       "run_at": "document_idle"
     }
