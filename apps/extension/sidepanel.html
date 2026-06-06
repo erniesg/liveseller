@@ -4,15 +4,103 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LiveSeller Controls</title>
+    <link rel="stylesheet" href="sidepanel.css" />
   </head>
   <body>
-    <main>
-      <h1>LiveSeller</h1>
-      <p id="connection">Disconnected</p>
-      <section aria-label="Seller approvals">
-        <button id="approve" type="button">Approve</button>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">LiveSeller Lane 3</p>
+        <h1>Vintage Jewelry Live Showcase</h1>
+        <span id="connection" class="status status-offline">Runtime disconnected</span>
+      </header>
+
+      <section class="notice" aria-label="Real Shopee selector status">
+        <strong>REAL_SHOPEE_UI_AUDIT_REQUIRED</strong>
+        <span>No public sends until real seller-tab selectors are proven.</span>
+      </section>
+
+      <section class="panel" aria-label="Current session">
+        <div class="section-title">
+          <h2>Session</h2>
+          <span>shop-sg-demo</span>
+        </div>
+        <dl class="session-grid">
+          <div>
+            <dt>Session ID</dt>
+            <dd>live-vintage-jewelry-001</dd>
+          </div>
+          <div>
+            <dt>Products</dt>
+            <dd>3 one-of-one brooches</dd>
+          </div>
+          <div>
+            <dt>Approval</dt>
+            <dd>Hybrid</dd>
+          </div>
+          <div>
+            <dt>Promo</dt>
+            <dd>SGD 8 off, overlay-only</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel" aria-label="Captured viewer message">
+        <div class="section-title">
+          <h2>Captured Message</h2>
+          <span>not sent</span>
+        </div>
+        <article class="message-card">
+          <strong>Real Buyer</strong>
+          <p>Is the cameo brooch real gold?</p>
+          <span>Blocked from runtime while disconnected</span>
+        </article>
+      </section>
+
+      <section class="panel" aria-label="Pending seller actions">
+        <div class="section-title">
+          <h2>Pending Actions</h2>
+          <span>policy gated</span>
+        </div>
+        <article class="action-card safe">
+          <strong>Pending safe reply</strong>
+          <p>Public-send eligible only when low-risk, no approval, and composer is empty.</p>
+        </article>
+        <article class="action-card private">
+          <strong>Seller-only escalation</strong>
+          <p>Authenticity, refund, legal, fraud, and unauthorized discount cases never public-send.</p>
+        </article>
+      </section>
+
+      <section class="panel" aria-label="Composer guard">
+        <div class="section-title">
+          <h2>Composer Guard</h2>
+          <span>active</span>
+        </div>
+        <p class="guard-copy">Drafting is skipped when the seller is typing or the composer already has text.</p>
+      </section>
+
+      <section class="panel" aria-label="Last tool result">
+        <div class="section-title">
+          <h2>Last Tool Result</h2>
+          <span>skipped</span>
+        </div>
+        <dl class="result-grid">
+          <div>
+            <dt>Adapter</dt>
+            <dd>shopee-content-script</dd>
+          </div>
+          <div>
+            <dt>Evidence</dt>
+            <dd>side-panel-state</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="approval-row" aria-label="Seller approvals">
+        <button id="approve" type="button">Approve Draft</button>
         <button id="reject" type="button">Reject</button>
       </section>
     </main>
+    <script src="sidepanel.js"></script>
   </body>
 </html>

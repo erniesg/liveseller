@@ -4,9 +4,19 @@ This document is the required real-path checkpoint before relying on Shopee sele
 
 ## Current Status
 
-- Status: not yet audited.
+- Status: blocked as of 2026-06-06.
 - Blocker label: `REAL_SHOPEE_UI_AUDIT_REQUIRED`.
-- Reason: this repo provides the extension/content-script skeleton and deterministic command safety, but no authenticated Shopee seller tab has been inspected yet.
+- Reason: this workspace has no authenticated Shopee seller live tab or second-device viewer account to inspect. The Lane 3 extension now provides deterministic local helpers, side-panel blocker states, and seller-command guards, but real Shopee automation must remain disabled until selectors and composer behavior are proven in an authenticated tab.
+
+## Latest Lane 3 Proof
+
+- Branch: `codex/jodisw-ui-context`.
+- Local mock proof: content-script helpers convert audited viewer rows with `data-viewer-id`, `data-viewer-name`, optional `data-language`, and nested `data-message-text` into `RuntimeEvent.viewer_chat`.
+- Host-row guard: rows marked `data-live-role="host"`, `data-is-host="true"`, or host-message `aria-label` are ignored.
+- Command proof: `send_reply` can public-send only when the runtime action is low-risk, does not require approval, has a `send_reply` payload, and the composer guard passes.
+- Seller-only proof: `draft_reply`, `escalate`, and `request_approval` do not public-send.
+- UI proof: `apps/extension/sidepanel.html` shows disconnected runtime, real-selector blocker, captured message, pending actions, composer guard, approval controls, and latest tool-result evidence for the vintage-jewelry live session.
+- Open blocker: no real Shopee URL, screenshot, selector list, second-device event log, or composer/send-button evidence is available in this environment.
 
 ## Required Evidence
 
