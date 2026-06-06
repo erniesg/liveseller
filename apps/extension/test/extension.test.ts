@@ -264,4 +264,12 @@ describe("Shopee extension command safety", () => {
     const manifest = readFileSync(join(repoRoot, "apps/extension/manifest.json"), "utf8");
     expect(manifest).not.toMatch(/OPENAI|sk-/i);
   });
+
+  it("ships a side-panel mount point for Codex operator events", () => {
+    const sidePanel = readFileSync(join(repoRoot, "apps/extension/sidepanel.html"), "utf8");
+
+    expect(sidePanel).toContain('id="liveseller-codex-operator"');
+    expect(sidePanel).toContain("Codex operator");
+    expect(sidePanel).not.toMatch(/OPENAI|sk-/i);
+  });
 });
