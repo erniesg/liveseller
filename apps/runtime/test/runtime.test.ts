@@ -1,12 +1,15 @@
 import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
 import { PassThrough } from "node:stream";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   type LanguageCode,
+  type LiveSessionSpec,
   type RuntimeEvent,
   LiveActionSchema,
+  LiveSessionSpecSchema,
   SellerTimelineResponseSchema,
   ShopeeCreateProductCommandSchema,
   validSellerFreeFormReviewResponse,
@@ -29,11 +32,14 @@ import { createRuntimeSessionStore } from "../src/sessionStore";
 import {
   createRealtimeClientSecret,
   createRealtimeAgentSession,
+  executeRealtimeAgentToolCall,
   loadRuntimeEnvFile,
   getRuntimeCameraCompositorStatus,
   createRuntimeServer,
+  startLocalTestStream,
   startOverlayStreamSmoke,
   startRuntimeCameraCompositor,
+  stopLocalTestStream,
   stopRuntimeCameraCompositor
 } from "../src/server";
 
@@ -311,9 +317,124 @@ describe("live brain policy runtime", () => {
     expect(body.session.instructions).toContain("translate host speech to English audio");
     expect(body.session.instructions).toContain("prompt the seller what to say next");
     expect(body.session.tools.map((tool: { name: string }) => tool.name)).toEqual(
-      expect.arrayContaining(["show_overlay_background", "send_policy_checked_reply"])
+      expect.arrayContaining([
+        "show_overlay_background",
+        "show_product_card",
+        "prompt_seller_script",
+        "emit_translation_caption",
+        "send_policy_checked_reply"
+      ])
     );
     expect(JSON.stringify(session)).not.toMatch(/server-test-key|sk-/i);
+  });
+
+  it("executes realtime agent tool calls against overlay and policy runtime state", async () => {
+    const store = createRuntimeSessionStore(validLiveSessionSpec);
+    const secondProduct = validLiveSessionSpec.products[1]!;
+
+    const productResult = executeRealtimeAgentToolCall(store, {
+      callId: "call-show-product",
+      name: "show_product_card",
+      arguments: {
+        productId: secondProduct.id
+      }
+    });
+    expect(productResult).toMatchObject({
+      status: "applied",
+      tool: "show_product_card",
+      sessionId: validLiveSessionSpec.sessionId,
+      overlayState: {
+        currentProductId: secondProduct.id,
+        productCard: {
+          productId: secondProduct.id,
+          title: secondProduct.title
+        }
+      }
+    });
+
+    const backgroundResult = executeRealtimeAgentToolCall(store, {
+      callId: "call-bg",
+      name: "show_overlay_background",
+      arguments: {
+        mode: "solid",
+        value: "#ee4d2d",
+        label: "Shopee orange live background"
+      }
+    });
+    expect(backgroundResult).toMatchObject({
+      status: "applied",
+      tool: "show_overlay_background",
+      overlayState: {
+        background: {
+          mode: "solid",
+          value: "#ee4d2d"
+        }
+      }
+    });
+
+    const captionResult = executeRealtimeAgentToolCall(store, {
+      callId: "call-caption",
+      name: "emit_translation_caption",
+      arguments: {
+        text: "这款收纳包适合旅行用",
+        language: "zh",
+        confidence: 0.92
+      }
+    });
+    expect(captionResult).toMatchObject({
+      status: "applied",
+      tool: "emit_translation_caption",
+      overlayState: {
+        caption: {
+          text: "这款收纳包适合旅行用",
+          language: "zh",
+          visible: true
+        }
+      }
+    });
+    expect(captionResult.overlayState?.translatedCaptions.some((caption) => caption.language === "en")).toBe(true);
+    expect(captionResult.routed?.actions.map((action) => action.type)).toEqual(
+      expect.arrayContaining(["update_caption", "emit_translation"])
+    );
+
+    const replyResult = executeRealtimeAgentToolCall(store, {
+      callId: "call-reply",
+      name: "send_policy_checked_reply",
+      arguments: {
+        viewerId: "viewer-realtime",
+        viewerName: "Realtime Buyer",
+        text: "How much stock for this product?",
+        language: "en"
+      }
+    });
+    expect(replyResult).toMatchObject({
+      status: "applied",
+      tool: "send_policy_checked_reply",
+      routed: {
+        context: {
+          currentProductId: secondProduct.id
+        }
+      }
+    });
+    expect(replyResult.routed?.actions.some((action: { type: string }) => action.type === "send_reply")).toBe(true);
+
+    const scriptResult = executeRealtimeAgentToolCall(store, {
+      callId: "call-script",
+      name: "prompt_seller_script",
+      arguments: {
+        productId: secondProduct.id
+      }
+    });
+    expect(scriptResult).toMatchObject({
+      status: "applied",
+      tool: "prompt_seller_script",
+      scriptSuggestion: {
+        productId: secondProduct.id,
+        title: secondProduct.title
+      }
+    });
+    expect(JSON.stringify([productResult, backgroundResult, captionResult, replyResult, scriptResult]).toLowerCase()).not.toContain("rtmp://");
+    expect(JSON.stringify([productResult, backgroundResult, captionResult, replyResult, scriptResult])).not.toMatch(/sk-/i);
   });
 
   it("rejects realtime agent sessions when the server OpenAI key is missing", async () => {
@@ -719,6 +840,180 @@ describe("live brain policy runtime", () => {
       const overlay = await overlayResponse.json();
       expect(overlay.productCard.productId).toBe(productId);
       expect(overlay.productCard.imageUri).toContain("vintage-jewelry");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
+  it("registers an approved custom live session for overlay, scripts, and realtime tools", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    const customSession: LiveSessionSpec = LiveSessionSpecSchema.parse({
+      ...validLiveSessionSpec,
+      sessionId: "live-custom-approved-001",
+      title: "Seller Approved Product Live",
+      products: [
+        {
+          ...validLiveSessionSpec.products[1]!,
+          id: "prod-approved-live-001",
+          sku: "APPROVED-LIVE-001",
+          title: "Approved Seller Live Product",
+          price: 28,
+          stock: 7,
+          media: {
+            ...validLiveSessionSpec.products[1]!.media,
+            images: [
+              {
+                ...validLiveSessionSpec.products[1]!.media.images[0]!,
+                id: "img-approved-live-001",
+                uri: "blob:liveseller-approved-product-preview"
+              }
+            ]
+          }
+        }
+      ],
+      promos: [],
+      retrievalRefs: []
+    });
+
+    try {
+      const origin = `http://127.0.0.1:${address.port}`;
+      const registerResponse = await fetch(`${origin}/api/live-sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          session: customSession
+        })
+      });
+      const registered = await registerResponse.json();
+      expect(registerResponse.status).toBe(201);
+      expect(registered).toMatchObject({
+        status: "registered",
+        sessionId: customSession.sessionId,
+        productCount: 1,
+        overlayUrl: `/api/overlay/${customSession.sessionId}`
+      });
+
+      const [specResponse, overlayResponse, scriptsResponse, toolResponse] = await Promise.all([
+        fetch(`${origin}/api/live-sessions/${customSession.sessionId}/spec`),
+        fetch(`${origin}/api/overlay/${customSession.sessionId}`),
+        fetch(`${origin}/api/live-sessions/${customSession.sessionId}/script-suggestions`),
+        fetch(`${origin}/api/runtime/realtime/tool-call`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: customSession.sessionId,
+            callId: "call-custom-bg",
+            name: "show_overlay_background",
+            arguments: {
+              mode: "solid",
+              value: "#ee4d2d",
+              label: "Shopee orange custom live"
+            }
+          })
+        })
+      ]);
+      const captionResponse = await fetch(`${origin}/api/runtime/realtime/tool-call`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: customSession.sessionId,
+          callId: "call-custom-caption",
+          name: "emit_translation_caption",
+          arguments: {
+            text: "这款直播商品今天只有七件",
+            language: "zh",
+            confidence: 0.91
+          }
+        })
+      });
+      const policyResponse = await fetch(`${origin}/api/runtime/realtime/tool-call`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: customSession.sessionId,
+          callId: "call-custom-policy",
+          name: "send_policy_checked_reply",
+          arguments: {
+            viewerId: "viewer-policy-log",
+            viewerName: "Policy Buyer",
+            text: "Can you give extra discount cheaper best price?",
+            language: "en"
+          }
+        })
+      });
+      const timelineResponse = await fetch(`${origin}/api/seller-timeline/events?sessionId=${customSession.sessionId}`);
+      const spec = await specResponse.json();
+      const overlay = await overlayResponse.json();
+      const scripts = await scriptsResponse.json();
+      const toolResult = await toolResponse.json();
+      const captionResult = await captionResponse.json();
+      const policyResult = await policyResponse.json();
+      const timeline = SellerTimelineResponseSchema.parse(await timelineResponse.json());
+
+      expect(specResponse.status).toBe(200);
+      expect(spec.title).toBe(customSession.title);
+      expect(overlay.productCard).toMatchObject({
+        productId: "prod-approved-live-001",
+        title: "Approved Seller Live Product",
+        imageUri: "blob:liveseller-approved-product-preview"
+      });
+      expect(scripts.suggestions[0]).toMatchObject({
+        productId: "prod-approved-live-001",
+        facts: {
+          stock: "7 left"
+        }
+      });
+      expect(toolResponse.status).toBe(200);
+      expect(toolResult.overlayState.background).toMatchObject({
+        mode: "solid",
+        value: "#ee4d2d"
+      });
+      expect(captionResponse.status).toBe(200);
+      expect(captionResult.overlayState.caption).toMatchObject({
+        text: "这款直播商品今天只有七件",
+        language: "zh",
+        visible: true
+      });
+      expect(captionResult.overlayState.translatedCaptions.some((caption: { language: string }) => caption.language === "en")).toBe(true);
+      expect(policyResponse.status).toBe(200);
+      expect(policyResult.routed.actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "request_approval",
+            requiresApproval: true,
+            risk: "medium"
+          })
+        ])
+      );
+      expect(policyResult.routed.auditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "policy", actor: "runtime" }),
+          expect.objectContaining({ kind: "approval", actor: "runtime" })
+        ])
+      );
+      expect(timeline.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "runtime_action",
+            title: "emit_translation",
+            approvalState: "none"
+          }),
+          expect.objectContaining({
+            kind: "runtime_action",
+            title: "request_approval",
+            approvalState: "pending"
+          })
+        ])
+      );
+      expect(JSON.stringify([toolResult, captionResult, policyResult, timeline])).not.toMatch(/server-test-key|sk-|rtmp:\/\//i);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
@@ -1278,5 +1573,78 @@ describe("live brain policy runtime", () => {
         server.close((error) => error ? reject(error) : resolve());
       });
     }
+  });
+
+  it("serves an isolated seller live-control UI without extension side-panel coupling", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime test server port");
+    }
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/seller-live-control?sessionId=${vintageJewelryLiveSessionSpec.sessionId}`
+      );
+      const html = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/html");
+      expect(html).toContain("LiveSeller isolated seller UI");
+      expect(html).toContain("Camera + AI overlays");
+      expect(html).toContain(vintageJewelryLiveSessionSpec.sessionId);
+      expect(html).toContain("/camera-compositor/preview");
+      expect(html).toContain("transparent%3D1");
+      expect(html).toContain("/api/runtime/realtime/tool-call");
+      expect(html).toContain("show_product_card");
+      expect(html).toContain("prompt_seller_script");
+      expect(html).toContain("emit_translation_caption");
+      expect(html).toContain("send_policy_checked_reply");
+      expect(html).toContain("/api/shopee/runtime-compositor/start");
+      expect(html).toContain("/api/test-stream/start");
+      expect(html).toContain("present_redacted");
+      expect(html).not.toMatch(/OPENAI_API_KEY|sk-/i);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
+  it("starts a local auto-published test stream without RTMP credentials", async () => {
+    const child = new EventEmitter() as ChildProcess;
+    child.stderr = new PassThrough();
+    child.kill = vi.fn() as unknown as ChildProcess["kill"];
+    const spawnImpl = vi.fn(() => child) as unknown as typeof import("node:child_process").spawn;
+    const captureImpl = vi.fn(async (_overlayUrl: string, screenshotPath: string) => {
+      writeFileSync(screenshotPath, "fake-overlay");
+    });
+
+    const result = await startLocalTestStream({
+      origin: "http://127.0.0.1:8787",
+      overlayUrl: "http://127.0.0.1:5180/?sessionId=live-vintage-jewelry-001&transparent=1",
+      sellerPreviewUrl: "http://127.0.0.1:8787/camera-compositor/preview",
+      cameraInputKind: "none",
+      cameraInput: "testsrc2=size=1280x720:rate=30",
+      spawnImpl,
+      captureImpl
+    });
+
+    expect(result.status).toBe("started_local_test_stream");
+    expect(result.viewerUrl).toContain("/test-stream/");
+    expect(result.hlsUrl).toContain("/index.m3u8");
+    expect(result.rtmpUrl).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("rtmp://");
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "ffmpeg",
+      expect.arrayContaining(["-f", "hls"]),
+      expect.any(Object)
+    );
+    expect(captureImpl).toHaveBeenCalled();
+
+    stopLocalTestStream();
   });
 });

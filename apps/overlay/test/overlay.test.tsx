@@ -448,4 +448,131 @@ describe("public overlay", () => {
     expect(screen.getByText("Confirm whether this voucher is Shopee-backed before posting.")).toBeInTheDocument();
     expect(screen.getByText("Summarize material questions and voucher blockers after stream.")).toBeInTheDocument();
   });
+
+  it("drives public overlay state through realtime agent tools from the seller console", async () => {
+    const currentProduct = vintageJewelryLiveSessionSpec.products[0]!;
+    const secondProduct = vintageJewelryLiveSessionSpec.products[1]!;
+    const overlayState = {
+      ...validOverlayState,
+      sessionId: vintageJewelryLiveSessionSpec.sessionId,
+      currentProductId: currentProduct.id,
+      productCard: {
+        productId: currentProduct.id,
+        title: currentProduct.title,
+        price: currentProduct.price,
+        currency: currentProduct.currency,
+        stock: currentProduct.stock,
+        imageUri: currentProduct.media.images[0]!.uri
+      }
+    };
+    const toolCalls: unknown[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith(`/api/live-sessions/${vintageJewelryLiveSessionSpec.sessionId}/spec`)) {
+        return new Response(JSON.stringify(vintageJewelryLiveSessionSpec), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.endsWith(`/api/overlay/${vintageJewelryLiveSessionSpec.sessionId}`)) {
+        return new Response(JSON.stringify(overlayState), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.endsWith(`/api/live-sessions/${vintageJewelryLiveSessionSpec.sessionId}/memory`)) {
+        return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith(`/api/live-sessions/${vintageJewelryLiveSessionSpec.sessionId}/summary`)) {
+        return new Response(JSON.stringify({ eventCount: 0 }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/api/runtime/realtime/agent-session")) {
+        return new Response(
+          JSON.stringify({
+            client_secret: { value: "ephemeral-test-secret" },
+            agent: {
+              name: "LiveSeller Realtime Copilot",
+              toolExecutionEndpoint: "/api/runtime/realtime/tool-call"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/api/runtime/realtime/tool-call")) {
+        const body = JSON.parse(String(init?.body));
+        toolCalls.push(body);
+        const nextProduct = body.name === "show_product_card" ? secondProduct : currentProduct;
+        return new Response(
+          JSON.stringify({
+            status: "applied",
+            tool: body.name,
+            scriptSuggestion: body.name === "prompt_seller_script"
+              ? {
+                  productId: secondProduct.id,
+                  title: secondProduct.title,
+                  script: `Show ${secondProduct.title}. Mention SGD 88.00 and one piece available.`
+                }
+              : undefined,
+            overlayState: {
+              ...overlayState,
+              currentProductId: nextProduct.id,
+              productCard: {
+                productId: nextProduct.id,
+                title: nextProduct.title,
+                price: nextProduct.price,
+                currency: nextProduct.currency,
+                stock: nextProduct.stock,
+                imageUri: nextProduct.media.images[0]!.uri
+              },
+              background: body.name === "show_overlay_background"
+                ? {
+                    mode: "solid",
+                    value: "#ee4d2d",
+                    label: "AI generated live background"
+                  }
+                : overlayState.background
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ error: "not_found" }), { status: 404 });
+    });
+
+    render(
+      <SellerConsole
+        runtimeOrigin="http://runtime.test"
+        sessionId={vintageJewelryLiveSessionSpec.sessionId}
+        fetchImpl={fetchImpl as typeof fetch}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText(vintageJewelryLiveSessionSpec.title)).toBeInTheDocument());
+    expect(screen.getByLabelText("Public overlay source")).toHaveTextContent(
+      `/?runtimeOrigin=http%3A%2F%2Fruntime.test&sessionId=${vintageJewelryLiveSessionSpec.sessionId}`
+    );
+
+    fireEvent.click(screen.getByText("Start Realtime 2 voice agent"));
+    await waitFor(() => expect(screen.getByText("Realtime 2 voice agent ready")).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByText("Show with AI")[1]!);
+    await waitFor(() => expect(toolCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "show_product_card",
+          arguments: { productId: secondProduct.id }
+        })
+      ])
+    ));
+
+    fireEvent.click(screen.getByText("Generate AI background"));
+    fireEvent.click(screen.getAllByText("Seller script")[1]!);
+    await waitFor(() => expect(toolCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "show_overlay_background" }),
+        expect.objectContaining({ name: "prompt_seller_script" })
+      ])
+    ));
+    expect(screen.getByText(`Show ${secondProduct.title}. Mention SGD 88.00 and one piece available.`)).toBeInTheDocument();
+  });
 });

@@ -614,26 +614,26 @@ function vintageImage(
 export const vintageJewelryProducts: ProductRecord[] = [
   {
     id: "prod-vintage-gold-grape-leaf-brooch",
-    sku: "LS-VJ-GLB-001",
-    title: "Vintage Gold-Tone Grape Leaf Brooch",
-    aliases: ["gold grape brooch", "leaf brooch", "grape cluster pin", "金色葡萄胸针"],
+    sku: "LS-VJ-GGL-001",
+    title: "Vintage Gold Grape Leaf Brooch",
+    aliases: ["gold grape brooch", "leaf brooch", "vintage gold brooch", "金色葡萄叶胸针"],
     category: "Fashion Accessories > Brooches",
     description:
-      "Vintage-style gold-tone brooch with layered leaf shapes and raised grape-cluster details, photographed in a jewelry case with warm floral styling.",
+      "Vintage gold-tone grape leaf brooch with textured leaves and clustered grape detailing, styled in a jewelry case with warm floral styling.",
     price: 88,
     currency: "SGD",
     variants: [
       {
-        id: "gold-grape-leaf-one-size",
-        name: "Gold-tone / One size",
-        sku: "LS-VJ-GLB-001-OS",
+        id: "gold-grape-leaf-brooch-one-size",
+        name: "Gold grape leaf / One size",
+        sku: "LS-VJ-GGL-001-OS",
         priceDelta: 0,
         stock: 1,
         attributes: { color: "Gold-tone", style: "Brooch" }
       }
     ],
     stock: 1,
-    dimensions: { weightGrams: 24, lengthCm: 6.5, widthCm: 3.4, heightCm: 1.8 },
+    dimensions: { weightGrams: 28, lengthCm: 5.5, widthCm: 4.2, heightCm: 1.4 },
     shipping: {
       originCountry: "SG",
       shipWithinDays: 2,
@@ -650,31 +650,31 @@ export const vintageJewelryProducts: ProductRecord[] = [
         vintageImage(
           "gold-grape-leaf-brooch-01",
           "/assets/products/vintage-jewelry/gold-grape-leaf-brooch-01.jpg",
-          "Gold-tone grape and leaf brooch in a velvet jewelry case",
+          "Gold-tone grape leaf brooch in a velvet jewelry case with orange flowers",
           "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰.jpg"
         ),
         vintageImage(
           "gold-grape-leaf-brooch-02",
           "/assets/products/vintage-jewelry/gold-grape-leaf-brooch-02.jpg",
-          "Gold grape leaf brooch alternate angle",
+          "Gold-tone grape leaf brooch angled close-up",
           "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰 (1).jpg"
         ),
         vintageImage(
           "gold-grape-leaf-brooch-03",
           "/assets/products/vintage-jewelry/gold-grape-leaf-brooch-03.jpg",
-          "Gold grape leaf brooch close-up",
+          "Gold-tone grape leaf brooch side detail",
           "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰 (2).jpg"
         ),
         vintageImage(
           "gold-grape-leaf-brooch-04",
           "/assets/products/vintage-jewelry/gold-grape-leaf-brooch-04.jpg",
-          "Gold-tone leaves and grape cluster detail",
+          "Gold-tone grape leaf brooch pin and leaf texture",
           "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰 (3).jpg"
         ),
         vintageImage(
           "gold-grape-leaf-brooch-05",
           "/assets/products/vintage-jewelry/gold-grape-leaf-brooch-05.jpg",
-          "Gold vintage brooch styled with orange flowers",
+          "Gold-tone grape leaf brooch full set detail",
           "金色新品合集。#小众饰品分享 #中古饰品 #中古首饰直播 #中古首饰 (4).jpg"
         )
       ],
@@ -683,12 +683,12 @@ export const vintageJewelryProducts: ProductRecord[] = [
     evidence: [vintageJewelryCitation],
     sourceConfidence: 0.86,
     listingDraft: {
-      title: "Vintage Gold-Tone Grape Leaf Brooch",
+      title: "Vintage Gold Grape Leaf Brooch",
       description:
-        "A one-of-one vintage-style gold-tone brooch with sculpted leaves and grape-cluster texture. Best for blazers, scarves, dresses, and collector styling.",
+        "A one-of-one vintage gold-tone grape leaf brooch with textured leaves and clustered grape detailing. Best shown close to camera so buyers can inspect the finish and pin.",
       bulletPoints: [
         "One available; structured stock is 1",
-        "Gold-tone botanical grape-and-leaf design",
+        "Gold-tone grape leaf brooch with textured leaf detail",
         "Vintage item: small age-related marks should be expected",
         "Seller should confirm metal composition before making material claims"
       ]
@@ -698,24 +698,24 @@ export const vintageJewelryProducts: ProductRecord[] = [
     id: "prod-vintage-blue-stone-bar-brooch",
     sku: "LS-VJ-BSB-002",
     title: "Vintage Blue Stone Bar Brooch",
-    aliases: ["blue brooch", "turquoise bar brooch", "blue rhinestone pin", "蓝色宝石胸针"],
+    aliases: ["blue stone brooch", "bar brooch", "vintage blue pin", "蓝色石胸针"],
     category: "Fashion Accessories > Brooches",
     description:
-      "Statement bar brooch with blue cabochon-style stones, bright rhinestone accents, and textured silver-tone bars.",
+      "Vintage bar brooch with oval blue-green cabochon stones set along a decorative gold-tone mount.",
     price: 118,
     currency: "SGD",
     variants: [
       {
         id: "blue-stone-bar-one-size",
-        name: "Blue stones / One size",
+        name: "Blue stone bar / One size",
         sku: "LS-VJ-BSB-002-OS",
         priceDelta: 0,
         stock: 1,
-        attributes: { color: "Blue", style: "Bar brooch" }
+        attributes: { color: "Blue green", style: "Bar brooch" }
       }
     ],
     stock: 1,
-    dimensions: { weightGrams: 28, lengthCm: 7.2, widthCm: 2.8, heightCm: 1.5 },
+    dimensions: { weightGrams: 30, lengthCm: 7.2, widthCm: 1.8, heightCm: 1.3 },
     shipping: {
       originCountry: "SG",
       shipWithinDays: 2,
@@ -732,25 +732,25 @@ export const vintageJewelryProducts: ProductRecord[] = [
         vintageImage(
           "blue-stone-bar-brooch-01",
           "/assets/products/vintage-jewelry/blue-stone-bar-brooch-01.jpg",
-          "Blue stone and rhinestone bar brooch in a velvet jewelry case",
+          "Blue-green stone bar brooch in a velvet jewelry case with orange flowers",
           "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风.jpg"
         ),
         vintageImage(
           "blue-stone-bar-brooch-02",
           "/assets/products/vintage-jewelry/blue-stone-bar-brooch-02.jpg",
-          "Blue stone bar brooch alternate angle",
+          "Blue-green stone bar brooch close-up",
           "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (1).jpg"
         ),
         vintageImage(
           "blue-stone-bar-brooch-03",
           "/assets/products/vintage-jewelry/blue-stone-bar-brooch-03.jpg",
-          "Blue bar brooch close-up with rhinestones",
+          "Blue-green stone bar brooch clasp detail",
           "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (2).jpg"
         ),
         vintageImage(
           "blue-stone-bar-brooch-04",
           "/assets/products/vintage-jewelry/blue-stone-bar-brooch-04.jpg",
-          "Vintage blue brooch styled with orange flowers",
+          "Blue-green stone bar brooch styled with flowers",
           "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (3).jpg"
         )
       ],
@@ -761,12 +761,12 @@ export const vintageJewelryProducts: ProductRecord[] = [
     listingDraft: {
       title: "Vintage Blue Stone Bar Brooch",
       description:
-        "A bright vintage statement brooch with blue cabochon-style stones, rhinestone sparkle, and textured silver-tone bar details.",
+        "A vintage bar brooch set with blue-green cabochon stones in a decorative gold-tone mount. Strong visual piece for close-up live selling.",
       bulletPoints: [
         "One available; structured stock is 1",
-        "Blue stones and rhinestone centerpiece",
+        "Blue-green oval stones along a bar brooch mount",
         "Works as a scarf, lapel, or dress accent",
-        "Stone identity should be described visually unless seller has certificate"
+        "Stone and metal details should be described visually unless seller has certificate"
       ]
     }
   },
@@ -774,10 +774,10 @@ export const vintageJewelryProducts: ProductRecord[] = [
     id: "prod-vintage-cameo-brooch",
     sku: "LS-VJ-CAM-003",
     title: "Vintage Cream Cameo Brooch",
-    aliases: ["cameo brooch", "cream cameo pin", "portrait brooch", "卡梅奥胸针"],
+    aliases: ["cameo brooch", "mother of pearl cameo", "portrait brooch", "卡梅奥胸针"],
     category: "Fashion Accessories > Brooches",
     description:
-      "Round cameo-style brooch with cream portrait relief, soft pink base, and gold-tone rim, styled in a vintage jewelry case.",
+      "Round mother-of-pearl cameo-style brooch with portrait relief and iridescent warm tones, styled in a vintage jewelry case.",
     price: 138,
     currency: "SGD",
     variants: [
@@ -806,63 +806,63 @@ export const vintageJewelryProducts: ProductRecord[] = [
     media: {
       images: [
         vintageImage(
-          "cameo-brooch-01",
+          "mother-of-pearl-cameo-brooch-01",
           "/assets/products/vintage-jewelry/cameo-brooch-01.jpg",
-          "Cream cameo brooch in a velvet jewelry case",
+          "Mother-of-pearl cameo portrait brooch in a velvet jewelry case with orange flowers",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享.jpg"
         ),
         vintageImage(
-          "cameo-brooch-02",
+          "mother-of-pearl-cameo-brooch-02",
           "/assets/products/vintage-jewelry/cameo-brooch-02.jpg",
-          "Cream cameo brooch alternate angle",
+          "Mother-of-pearl cameo portrait brooch angled detail",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (1).jpg"
         ),
         vintageImage(
-          "cameo-brooch-03",
+          "mother-of-pearl-cameo-brooch-03",
           "/assets/products/vintage-jewelry/cameo-brooch-03.jpg",
-          "Cameo portrait relief close-up",
+          "Mother-of-pearl cameo portrait brooch rim detail",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (2).jpg"
         ),
         vintageImage(
-          "cameo-brooch-04",
+          "mother-of-pearl-cameo-brooch-04",
           "/assets/products/vintage-jewelry/cameo-brooch-04.jpg",
-          "Cameo brooch with gold-tone rim",
+          "Mother-of-pearl cameo portrait brooch side view",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (3).jpg"
         ),
         vintageImage(
-          "cameo-brooch-05",
+          "mother-of-pearl-cameo-brooch-05",
           "/assets/products/vintage-jewelry/cameo-brooch-05.jpg",
-          "Cameo brooch side-lit detail",
+          "Mother-of-pearl cameo portrait brooch close-up",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (4).jpg"
         ),
         vintageImage(
-          "cameo-brooch-06",
+          "mother-of-pearl-cameo-brooch-06",
           "/assets/products/vintage-jewelry/cameo-brooch-06.jpg",
-          "Vintage cameo brooch in presentation box",
+          "Mother-of-pearl cameo portrait brooch in a velvet jewelry case with orange flowers",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (5).jpg"
         ),
         vintageImage(
-          "cameo-brooch-07",
+          "mother-of-pearl-cameo-brooch-07",
           "/assets/products/vintage-jewelry/cameo-brooch-07.jpg",
-          "Cream cameo brooch with floral styling",
+          "Mother-of-pearl cameo portrait brooch clasp detail",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (6).jpg"
         ),
         vintageImage(
-          "cameo-brooch-08",
+          "mother-of-pearl-cameo-brooch-08",
           "/assets/products/vintage-jewelry/cameo-brooch-08.jpg",
-          "Round cameo brooch close-up",
+          "Mother-of-pearl cameo portrait brooch presentation detail",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (7).jpg"
         ),
         vintageImage(
-          "cameo-brooch-09",
+          "mother-of-pearl-cameo-brooch-09",
           "/assets/products/vintage-jewelry/cameo-brooch-09.jpg",
-          "Cameo brooch portrait and rim detail",
+          "Mother-of-pearl cameo portrait brooch on velvet display",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (8).jpg"
         ),
         vintageImage(
-          "cameo-brooch-10",
+          "mother-of-pearl-cameo-brooch-10",
           "/assets/products/vintage-jewelry/cameo-brooch-10.jpg",
-          "Vintage cream cameo brooch final angle",
+          "Mother-of-pearl cameo portrait brooch final angle",
           "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (9).jpg"
         )
       ],
@@ -871,12 +871,12 @@ export const vintageJewelryProducts: ProductRecord[] = [
     evidence: [vintageJewelryCitation],
     sourceConfidence: 0.87,
     listingDraft: {
-      title: "Vintage Cream Cameo Brooch",
+      title: "Vintage Mother-of-Pearl Cameo Brooch",
       description:
-        "A romantic cameo-style brooch with cream portrait relief, pink-toned backing, and a gold-tone rim. Strong hero piece for vintage jewelry lives.",
+        "A romantic mother-of-pearl cameo-style brooch with portrait relief and iridescent warm tones. Strong hero piece for vintage jewelry lives.",
       bulletPoints: [
         "One available; structured stock is 1",
-        "Cream portrait relief with gold-tone rim",
+        "Iridescent portrait relief with warm mother-of-pearl tones",
         "Best shown close to camera so buyers can inspect carving depth",
         "Avoid claiming shell, stone, or era unless certificate is supplied"
       ]

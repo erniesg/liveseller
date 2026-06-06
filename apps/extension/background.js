@@ -8,6 +8,9 @@ chrome.runtime.onInstalled.addListener(() => {
 const SHOPEE_LIVE_SETUP_URL = "https://live.shopee.sg/pc/setup?from=seller_center";
 const SHOPEE_CREATE_PRODUCT_URL = "https://seller.shopee.sg/portal/product/new";
 let productAutomationInFlight = false;
+const AUTO_REPLY_SESSION_ID = "live-vintage-jewelry-001";
+const autoReplySeenMessages = new Set();
+const autoReplySentTexts = new Set();
 
 function waitForTabLoad(tabId) {
   return new Promise((resolve) => {
@@ -352,20 +355,91 @@ function confirmShopeeGoLiveClick() {
 
 function fillShopeeReplyComposer(action) {
   const text = action?.payload?.text;
-  const composer = document.querySelector("[data-liveseller-composer], textarea[placeholder*='message' i], textarea, input[placeholder*='message' i]");
-  if (!text || !composer || !("value" in composer)) {
+  const composer = document.querySelector(
+    "[data-liveseller-composer], [role='textbox'], div[contenteditable='true'], textarea[placeholder*='message' i], textarea, input[placeholder*='message' i]"
+  );
+  if (!text || !composer) {
     return { ok: false, error: "composer_not_found" };
   }
-  if (String(composer.value || "").trim()) {
+  const existingValue = "value" in composer ? composer.value : composer.innerText || composer.textContent || "";
+  if (String(existingValue || "").trim()) {
     return { ok: false, error: "seller_is_typing" };
   }
-  composer.value = text;
-  composer.dispatchEvent(new Event("input", { bubbles: true }));
-  const send = document.querySelector("[data-liveseller-send], button[type='submit']");
+  composer.focus?.();
+  const execCommand = document.execCommand?.bind(document);
+  let inserted = false;
+  if (execCommand) {
+    execCommand("selectAll");
+    execCommand("delete");
+    inserted = Boolean(execCommand("insertText", false, text));
+  }
+  if (!inserted && "value" in composer) {
+    composer.value = text;
+    composer.dispatchEvent(new Event("input", { bubbles: true }));
+  } else if (!inserted) {
+    composer.textContent = text;
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+  }
+  const send = document.querySelector("[data-liveseller-send], button[class*='send-btn'], button[type='submit']");
   if (send instanceof HTMLButtonElement) {
     send.click();
   }
   return { ok: true, publicSend: true, title: document.title, url: location.href };
+}
+
+async function routeViewerMessageToRuntime(message) {
+  const text = String(message.text || "").trim();
+  const viewerName = String(message.viewerName || message.viewerId || "Shopee Viewer").trim();
+  const viewerId = String(message.viewerId || viewerName || "shopee-viewer").trim();
+  if (!text || autoReplySentTexts.has(text)) {
+    return { ok: true, skipped: "empty_or_own_reply" };
+  }
+  const dedupeKey = `${viewerId}:${viewerName}:${text}`;
+  if (autoReplySeenMessages.has(dedupeKey)) {
+    return { ok: true, skipped: "duplicate" };
+  }
+  autoReplySeenMessages.add(dedupeKey);
+
+  const runtimeOriginRecord = await chrome.storage.session.get("liveseller:runtimeOrigin");
+  const runtimeOrigin = runtimeOriginRecord["liveseller:runtimeOrigin"] || "http://127.0.0.1:8787";
+  const event = {
+    eventId: `shopee-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    sessionId: AUTO_REPLY_SESSION_ID,
+    timestamp: new Date().toISOString(),
+    source: "viewer",
+    type: "viewer_chat",
+    payload: {
+      viewerId,
+      viewerName,
+      text,
+      language: /[\u4e00-\u9fff]/u.test(text) ? "zh" : "en"
+    }
+  };
+  const response = await fetch(`${runtimeOrigin}/api/runtime/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(event)
+  });
+  const runtimeBody = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, error: runtimeBody.error || `runtime_${response.status}`, event };
+  }
+  const safeReplies = Array.isArray(runtimeBody.actions)
+    ? runtimeBody.actions.filter(isLowRiskSendReply)
+    : [];
+  const executed = [];
+  for (const action of safeReplies) {
+    const tab = await findOrCreateShopeeLiveTab();
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: fillShopeeReplyComposer,
+      args: [action]
+    });
+    const evidence = result?.result || {};
+    if (evidence.ok) autoReplySentTexts.add(action.payload.text.trim());
+    executed.push({ actionId: action.actionId, evidence });
+  }
+  return { ok: true, event, actions: runtimeBody.actions || [], executed };
 }
 
 function inspectOrAdvanceShopeePreview() {
@@ -527,12 +601,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         viewerId: message.viewerId,
         viewerName: message.viewerName,
         text: message.text,
+        isHost: Boolean(message.isHost),
+        source: message.source || "content-script",
         capturedAt: new Date().toISOString(),
-        source: "content-script"
       }
     });
-    sendResponse({ ok: true });
-    return false;
+    routeViewerMessageToRuntime(message)
+      .then((result) => sendResponse({ ok: true, autoReply: result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
   }
 
   if (message?.type === "liveseller:get-last-viewer-message") {

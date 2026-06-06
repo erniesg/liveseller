@@ -170,6 +170,24 @@ describe("Shopee extension command safety", () => {
     expect(skipped.toolResult.status).toBe("skipped");
   });
 
+  it("queues low-risk replies into Shopee contenteditable composer rows", () => {
+    let clicked = 0;
+    document.body.innerHTML = `
+      <div role="textbox" contenteditable="true" class="divTextarea_12bb8"></div>
+      <button class="send-btn_123" type="button">Send</button>
+    `;
+    document.querySelector("button")?.addEventListener("click", () => {
+      clicked += 1;
+    });
+
+    const applied = executeQueuedSellerReply(validLiveAction, document);
+
+    expect(applied.toolResult.status).toBe("applied");
+    expect(document.querySelector("[role='textbox']")?.textContent)
+      .toBe(validLiveAction.payload.kind === "send_reply" ? validLiveAction.payload.text : "");
+    expect(clicked).toBe(1);
+  });
+
   it("prepares Shopee livestream creation with redacted stream credential evidence", () => {
     const prepared = executeShopeeStartLivestreamCommand(validShopeeStartLivestreamCommand);
 
@@ -210,7 +228,8 @@ describe("Shopee extension command safety", () => {
     expect(message).toEqual({
       viewerId: "viewer-real",
       viewerName: "Real Buyer",
-      text: "How much is the tumbler?"
+      text: "How much is the tumbler?",
+      source: "data-viewer-row"
     });
 
     const event = toViewerChatEvent(message!, "live-seed-001", "2026-06-06T02:00:00.000Z");
@@ -219,6 +238,32 @@ describe("Shopee extension command safety", () => {
       throw new Error("Expected viewer_chat event");
     }
     expect(event.payload.text).toContain("tumbler");
+  });
+
+  it("captures real Shopee Live comment rows from the preview/live dashboard", () => {
+    document.body.innerHTML = `
+      <div class="comment-container_7ca29">
+        <div class="normal-item_abc">
+          <span class="user-name_2fad3">buyer123</span>
+          <span class="message-content_3bb92">How much is this?</span>
+        </div>
+      </div>
+      <div class="comment-container_7ca29">
+        <div class="highlight-item_abc">
+          <span class="message-content_3bb92">buyer123 joined!</span>
+        </div>
+      </div>
+    `;
+
+    const rows = Array.from(document.querySelectorAll(".comment-container_7ca29"));
+    expect(extractViewerMessage(rows[0]!)).toEqual({
+      viewerId: "buyer123",
+      viewerName: "buyer123",
+      text: "How much is this?",
+      isHost: false,
+      source: "shopee-dom-row"
+    });
+    expect(extractViewerMessage(rows[1]!)).toBeNull();
   });
 
   it("hooks receiveNormalUserMessage without blocking the Shopee page handler", () => {

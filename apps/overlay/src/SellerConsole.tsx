@@ -60,6 +60,18 @@ type RollingSummarySnapshot = {
   recommendations?: string[];
 };
 
+type RealtimeToolCallResult = {
+  status: "applied";
+  tool: string;
+  overlayState?: OverlayState;
+  routed?: RuntimeRouteResponse;
+  scriptSuggestion?: {
+    productId: string;
+    title: string;
+    script: string;
+  };
+};
+
 const hostTranscriptSamples = [
   "这枚金色葡萄叶胸针今天只有一枚，适合搭配黑色外套。",
   "This brooch is from our vintage jewelry showcase, ships from Singapore.",
@@ -164,6 +176,9 @@ export function SellerConsole({
   const [backgroundValue, setBackgroundValue] = useState("#0f766e");
   const [lastActions, setLastActions] = useState<RuntimeRouteResponse["actions"]>([]);
   const [lastResult, setLastResult] = useState("Ready");
+  const [voiceAgentStatus, setVoiceAgentStatus] = useState("Realtime 2 voice agent not started");
+  const [toolLog, setToolLog] = useState<string[]>([]);
+  const [sellerScript, setSellerScript] = useState("");
   const [sellerMemory, setSellerMemory] = useState<SellerMemorySnapshot>();
   const [rollingSummary, setRollingSummary] = useState<RollingSummarySnapshot>();
 
@@ -199,6 +214,36 @@ export function SellerConsole({
     setLastActions(routed.actions);
     setLastResult(label);
     await syncSellerContext();
+  }
+
+  async function callRealtimeTool(name: string, args: Record<string, unknown>): Promise<RealtimeToolCallResult> {
+    const response = await fetchImpl(`${runtimeOrigin}/api/runtime/realtime/tool-call`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        callId: `${name}-${Date.now()}`,
+        name,
+        arguments: args
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`Realtime tool returned ${response.status}`);
+    }
+    const result = await response.json() as RealtimeToolCallResult;
+    if (result.overlayState) {
+      setOverlayState(OverlayStateSchema.parse(result.overlayState));
+    }
+    if (result.routed?.actions) {
+      setLastActions(result.routed.actions);
+    }
+    if (result.scriptSuggestion?.script) {
+      setSellerScript(result.scriptSuggestion.script);
+    }
+    setToolLog((entries) => [`${result.tool}: ${result.scriptSuggestion?.script ?? result.overlayState?.background?.label ?? "applied"}`, ...entries].slice(0, 6));
+    setLastResult(`${result.tool} applied`);
+    await syncSellerContext();
+    return result;
   }
 
   useEffect(() => {
@@ -250,6 +295,31 @@ export function SellerConsole({
       },
       `Showing ${productId}`
     );
+  }
+
+  async function showProductWithAi(productId: string) {
+    await callRealtimeTool("show_product_card", { productId });
+  }
+
+  async function promptSellerScript(productId: string) {
+    await callRealtimeTool("prompt_seller_script", { productId });
+  }
+
+  async function startRealtimeAgent() {
+    const response = await fetchImpl(`${runtimeOrigin}/api/runtime/realtime/agent-session`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        voice: "marin"
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`Realtime agent session returned ${response.status}`);
+    }
+    await response.json();
+    setVoiceAgentStatus("Realtime 2 voice agent ready");
+    setToolLog((entries) => ["Realtime 2 voice agent ready: microphone/WebRTC session can call overlay tools.", ...entries].slice(0, 6));
   }
 
   async function startShow() {
@@ -311,23 +381,11 @@ export function SellerConsole({
   }
 
   async function applyBackground() {
-    const response = await fetchImpl(`${runtimeOrigin}/api/overlay/${sessionId}/background`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        background: {
-          mode: "solid",
-          value: backgroundValue,
-          label: "Seller console background"
-        }
-      })
+    await callRealtimeTool("show_overlay_background", {
+      mode: "solid",
+      value: backgroundValue,
+      label: "AI generated live background"
     });
-    if (!response.ok) {
-      throw new Error(`Runtime background update returned ${response.status}`);
-    }
-    const nextState = OverlayStateSchema.parse(await response.json());
-    setOverlayState(nextState);
-    setLastResult("Background updated");
   }
 
   return (
@@ -337,6 +395,7 @@ export function SellerConsole({
           <p className="seller-console-kicker">Seller test console</p>
           <h1>{session.title}</h1>
           <p>{session.sessionId}</p>
+          <p aria-label="Public overlay source">{publicOverlayUrl}</p>
         </div>
         <div className={`seller-console-status seller-console-status-${status}`}>
           <span aria-hidden="true" />
@@ -370,6 +429,12 @@ export function SellerConsole({
                 <button type="button" onClick={() => void showProduct(product.id)}>
                   Show
                 </button>
+                <button type="button" onClick={() => void showProductWithAi(product.id).catch((error) => setLastResult(error.message))}>
+                  Show with AI
+                </button>
+                <button type="button" onClick={() => void promptSellerScript(product.id).catch((error) => setLastResult(error.message))}>
+                  Seller script
+                </button>
               </article>
             ))}
           </div>
@@ -378,10 +443,16 @@ export function SellerConsole({
         <section className="seller-panel" aria-label="Video overlay test controls">
           <div className="seller-panel-heading">
             <h2>Video overlay</h2>
-            <button type="button" onClick={() => void syncOverlay().then(() => setStatus("live")).catch(() => setStatus("error"))}>
-              Sync
-            </button>
+            <div className="seller-heading-actions">
+              <button type="button" onClick={() => void startRealtimeAgent().catch((error) => setVoiceAgentStatus(error.message))}>
+                Start Realtime 2 voice agent
+              </button>
+              <button type="button" onClick={() => void syncOverlay().then(() => setStatus("live")).catch(() => setStatus("error"))}>
+                Sync
+              </button>
+            </div>
           </div>
+          <p>{voiceAgentStatus}</p>
           <label>
             Host caption
             <textarea value={hostText} onChange={(event) => setHostText(event.target.value)} rows={4} />
@@ -409,8 +480,11 @@ export function SellerConsole({
             <input value={backgroundValue} onChange={(event) => setBackgroundValue(event.target.value)} />
           </label>
           <button type="button" onClick={() => void applyBackground().catch((error) => setLastResult(error.message))}>
-            Apply background
+            Generate AI background
           </button>
+          <div className="seller-action-log">
+            {toolLog.map((entry) => <p key={entry}>{entry}</p>)}
+          </div>
         </section>
 
         <section className="seller-panel" aria-label="Viewer chat test">
@@ -452,6 +526,7 @@ export function SellerConsole({
             {sellerVisibleActions.map((action) => (
               <p key={action.actionId}>{action.type} · {action.risk} · {action.requiresApproval ? "approval" : "auto"}</p>
             ))}
+            {sellerScript ? <p>{sellerScript}</p> : null}
           </div>
         </section>
 

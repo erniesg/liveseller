@@ -30,6 +30,8 @@ export type CapturedViewerMessage = {
   viewerId: string;
   viewerName: string;
   text: string;
+  isHost?: boolean;
+  source?: string;
 };
 
 export type ReceiveNormalUserMessageTarget = {
@@ -137,14 +139,33 @@ export function extractViewerMessage(row: Element): CapturedViewerMessage | null
   const viewerName = row.getAttribute("data-viewer-name");
   const text = row.textContent?.trim();
 
-  if (!viewerId || !viewerName || !text) {
+  if (viewerId && viewerName && text) {
+    return {
+      viewerId,
+      viewerName,
+      text,
+      source: "data-viewer-row"
+    };
+  }
+
+  const shopeeText = row.querySelector(".message-content_3bb92")?.textContent?.trim();
+  const shopeeViewerName = row.querySelector(".user-name_2fad3")?.textContent?.trim();
+  const shopeeItem = row.querySelector("[class*='item_']") ?? row;
+  const shopeeClassName = String((shopeeItem as HTMLElement).className ?? "");
+  const isSystemRow = !shopeeViewerName ||
+    shopeeClassName.includes("highlight-item") ||
+    /joined!|Welcome to Shopee Live/i.test(shopeeText ?? "");
+
+  if (!shopeeText || isSystemRow) {
     return null;
   }
 
   return {
-    viewerId,
-    viewerName,
-    text
+    viewerId: shopeeViewerName,
+    viewerName: shopeeViewerName,
+    text: shopeeText,
+    isHost: shopeeClassName.includes("host-item") || Boolean(row.querySelector(".host-icon_3f8fa")),
+    source: "shopee-dom-row"
   };
 }
 

@@ -167,6 +167,19 @@ function firstElement<T extends HTMLInputElement | HTMLTextAreaElement>(
   return undefined;
 }
 
+function firstReplyComposer(
+  root: ParentNode,
+  selectors: string[]
+): HTMLInputElement | HTMLTextAreaElement | HTMLElement | undefined {
+  for (const selector of selectors) {
+    const node = root.querySelector(selector);
+    if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLElement) {
+      return node;
+    }
+  }
+  return undefined;
+}
+
 function writeField(
   root: ParentNode,
   selectors: string[],
@@ -289,22 +302,35 @@ export function executeQueuedSellerReply(
   action: LiveAction,
   root: ParentNode = document
 ): ExecutedCommand {
-  const composer = firstElement(root, [
+  const composer = firstReplyComposer(root, [
     "[data-liveseller-composer]",
+    "[role='textbox']",
+    "div[contenteditable='true']",
     "textarea[placeholder*='message' i]",
     "textarea",
     "input[placeholder*='message' i]"
   ]);
+  const composerValue = composer instanceof HTMLInputElement || composer instanceof HTMLTextAreaElement
+    ? composer.value
+    : composer?.textContent ?? "";
   const composerState = {
-    value: composer?.value ?? "",
-    isSellerTyping: Boolean(composer?.value.trim())
+    value: composerValue,
+    isSellerTyping: Boolean(composerValue.trim())
   };
   const executed = executeSellerCommand(action, composerState);
 
   if (executed.toolResult.status === "applied" && action.payload.kind === "send_reply" && composer) {
-    composer.value = action.payload.text;
-    composer.dispatchEvent(new Event("input", { bubbles: true }));
-    const button = root.querySelector("[data-liveseller-send], button[type='submit']");
+    if (composer instanceof HTMLInputElement || composer instanceof HTMLTextAreaElement) {
+      composer.value = action.payload.text;
+    } else {
+      composer.textContent = action.payload.text;
+      composer.innerText = action.payload.text;
+    }
+    const inputEvent = typeof InputEvent === "function"
+      ? new InputEvent("input", { bubbles: true, data: action.payload.text, inputType: "insertText" })
+      : new Event("input", { bubbles: true });
+    composer.dispatchEvent(inputEvent);
+    const button = root.querySelector("[data-liveseller-send], button[class*='send-btn'], button[type='submit']");
     if (button instanceof HTMLButtonElement) {
       button.click();
     }

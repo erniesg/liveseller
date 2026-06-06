@@ -208,15 +208,36 @@ function inferProductName(fileName) {
 }
 
 async function fetchJson(path, options = {}) {
-  const response = await fetch(`${runtimeOrigin()}${path}`, {
-    headers: { "content-type": "application/json", ...(options.headers || {}) },
-    ...options
-  });
+  const { timeoutMs, ...fetchOptions } = options;
+  const controller = timeoutMs ? new AbortController() : undefined;
+  const timeout = timeoutMs
+    ? setTimeout(() => controller?.abort(), timeoutMs)
+    : undefined;
+  let response;
+  try {
+    response = await fetch(`${runtimeOrigin()}${path}`, {
+      headers: { "content-type": "application/json", ...(fetchOptions.headers || {}) },
+      ...fetchOptions,
+      signal: fetchOptions.signal || controller?.signal
+    });
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(body.message || body.error || `HTTP ${response.status}`);
   }
   return body;
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  let timeout;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
 }
 
 async function fetchOperatorJson(path, options = {}) {
@@ -489,8 +510,7 @@ async function loadRuntimeLiveSessionSpec() {
       error: error instanceof Error ? error.message : String(error)
     });
   }
-  renderLiveLineup();
-  renderLivePreview();
+  updateLaunchChecklist();
 }
 
 function updateLaunchChecklist() {
@@ -1377,9 +1397,14 @@ async function startRealtimeAgent() {
     body: JSON.stringify({
       sessionId: liveSessionId(),
       voice: "marin"
-    })
+    }),
+    timeoutMs: 8000
   });
-  const sdkResult = await connectOpenAiRealtimeAgent(response);
+  const sdkResult = await withTimeout(
+    connectOpenAiRealtimeAgent(response),
+    8000,
+    "Realtime voice copilot connection"
+  );
   writeLog("#realtime-log", {
     status: sdkResult.connected ? "openai_realtime_agent_connected" : "openai_realtime_agent_session_ready",
     clientSecretPresent: Boolean(response.client_secret || response.value),

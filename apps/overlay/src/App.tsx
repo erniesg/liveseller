@@ -8,6 +8,7 @@ type AppProps = {
   state?: OverlayState;
   now?: Date;
   connectionStatus?: OverlayConnectionStatus;
+  transparent?: boolean;
 };
 
 type RuntimeOverlayProps = {
@@ -15,6 +16,7 @@ type RuntimeOverlayProps = {
   sessionId?: string;
   pollMs?: number;
   fetchImpl?: typeof fetch;
+  transparent?: boolean;
 };
 
 export function formatCountdown(endsAt: string, now = new Date()): string {
@@ -43,7 +45,8 @@ export function RuntimeOverlay({
   runtimeOrigin = "http://127.0.0.1:8787",
   sessionId = validLiveSessionSpec.sessionId,
   pollMs = 1000,
-  fetchImpl = fetch
+  fetchImpl = fetch,
+  transparent = false
 }: RuntimeOverlayProps) {
   const [state, setState] = useState<OverlayState>(validOverlayState);
   const [connectionStatus, setConnectionStatus] = useState<OverlayConnectionStatus>("connecting");
@@ -82,10 +85,10 @@ export function RuntimeOverlay({
     };
   }, [fetchImpl, pollMs, runtimeOrigin, sessionId]);
 
-  return <App state={state} connectionStatus={connectionStatus} />;
+  return <App state={state} connectionStatus={connectionStatus} transparent={transparent} />;
 }
 
-export function App({ state = validOverlayState, now, connectionStatus = "fixture" }: AppProps) {
+export function App({ state = validOverlayState, now, connectionStatus = "fixture", transparent = false }: AppProps) {
   const backingLabel = state.promoBanner?.backing === "shopee" ? "Shopee-backed" : "Overlay-only";
   const statusLabel = connectionStatus === "live"
     ? "Runtime live"
@@ -99,7 +102,11 @@ export function App({ state = validOverlayState, now, connectionStatus = "fixtur
     : undefined;
 
   return (
-    <main className="overlay-shell" style={backgroundStyle} aria-label="LiveSeller livestream overlay">
+    <main
+      className={`overlay-shell${transparent ? " overlay-shell-transparent" : ""}`}
+      style={backgroundStyle}
+      aria-label="LiveSeller livestream overlay"
+    >
       <div className={`runtime-status runtime-status-${connectionStatus}`} aria-label="Overlay runtime status">
         <span aria-hidden="true" />
         <strong>{statusLabel}</strong>
