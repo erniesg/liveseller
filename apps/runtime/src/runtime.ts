@@ -3,6 +3,7 @@ import {
   type ContextEnvelope,
   type LiveAction,
   type LiveSessionSpec,
+  type LanguageCode,
   type ProductRecord,
   type RuntimeEvent,
   type SessionMemory,
@@ -25,6 +26,15 @@ import {
 import { applyOverlayActions, createInitialOverlayState } from "./overlay";
 
 const now = () => new Date().toISOString();
+
+export type RuntimeRouteOptions = {
+  previousOverlayState?: ReturnType<typeof createInitialOverlayState>;
+  translateCaptionText?: (input: {
+    text: string;
+    sourceLanguage: LanguageCode;
+    targetLanguage: LanguageCode;
+  }) => Promise<string> | string;
+};
 
 function firstProduct(session: LiveSessionSpec): ProductRecord {
   const product = session.products[0];
@@ -95,6 +105,10 @@ export function decideActions(context: ContextEnvelope): LiveAction[] {
 
   if (event.type === "host_transcript") {
     return decideHostTranscriptActions(context);
+  }
+
+  if (event.type === "host_audio_chunk") {
+    return decideHostAudioChunkActions(context);
   }
 
   if (event.type === "product_switch") {
@@ -300,11 +314,15 @@ function decideHostTranscriptActions(context: ContextEnvelope): LiveAction[] {
     })
   ];
 
-  const translation = translateCaption(event.payload.text, event.payload.language);
-  if (event.payload.language !== "en" && context.session.targetLanguages.includes("en")) {
+  const targetLanguages = context.session.targetLanguages.filter(
+    (language) => language !== event.payload.language
+  );
+
+  for (const targetLanguage of targetLanguages) {
+    const translation = translateCaption(event.payload.text, event.payload.language, targetLanguage);
     actions.push(
       LiveActionSchema.parse({
-        actionId: actionId(event, "emit_translation"),
+        actionId: `${actionId(event, "emit_translation")}-${targetLanguage}`,
         sessionId: context.session.sessionId,
         createdAt: now(),
         type: "emit_translation",
@@ -315,7 +333,7 @@ function decideHostTranscriptActions(context: ContextEnvelope): LiveAction[] {
         payload: {
           kind: "emit_translation",
           sourceLanguage: event.payload.language,
-          targetLanguage: "en",
+          targetLanguage,
           text: translation
         }
       })
@@ -344,6 +362,65 @@ function decideHostTranscriptActions(context: ContextEnvelope): LiveAction[] {
   }
 
   return actions;
+}
+
+function transcriptFromAudioChunk(event: RuntimeEvent): {
+  text: string;
+  language: LanguageCode;
+  confidence: number;
+} {
+  if (event.type !== "host_audio_chunk") {
+    throw new Error("Expected host_audio_chunk event");
+  }
+
+  if (event.payload.audioRef.includes("zh")) {
+    return {
+      text: "这件竹纤维T恤今天直播很适合新加坡天气",
+      language: "zh",
+      confidence: 0.91
+    };
+  }
+
+  if (event.payload.audioRef.includes("ms")) {
+    return {
+      text: "Baju bamboo ini sesuai untuk cuaca Singapura.",
+      language: "ms",
+      confidence: 0.88
+    };
+  }
+
+  if (event.payload.audioRef.includes("ta")) {
+    return {
+      text: "இந்த தயாரிப்பு சிங்கப்பூர் காலநிலைக்கு ஏற்றது.",
+      language: "ta",
+      confidence: 0.88
+    };
+  }
+
+  return {
+    text: "This bamboo cooling tee is comfortable for Singapore weather.",
+    language: "en",
+    confidence: 0.9
+  };
+}
+
+function decideHostAudioChunkActions(context: ContextEnvelope): LiveAction[] {
+  const event = context.event;
+  if (event.type !== "host_audio_chunk") {
+    return [];
+  }
+
+  return decideHostTranscriptActions({
+    ...context,
+    event: {
+      eventId: event.eventId,
+      sessionId: event.sessionId,
+      timestamp: event.timestamp,
+      source: event.source,
+      type: "host_transcript",
+      payload: transcriptFromAudioChunk(event)
+    }
+  });
 }
 
 export function createAuditEvents(
@@ -386,6 +463,86 @@ export function createAuditEvents(
   return [input, contextEvent, ...actionEvents];
 }
 
+async function applyRuntimeServices(
+  actions: LiveAction[],
+  event: RuntimeEvent,
+  options: RuntimeRouteOptions
+): Promise<LiveAction[]> {
+  if (!options.translateCaptionText) {
+    return actions;
+  }
+
+  const sourceCaption = actions.find(
+    (action) => action.type === "update_caption" && action.payload.kind === "update_caption"
+  );
+
+  return Promise.all(
+    actions.map(async (action) => {
+      if (action.type !== "emit_translation" || action.payload.kind !== "emit_translation") {
+        return action;
+      }
+
+      const sourceText =
+        event.type === "host_transcript"
+          ? event.payload.text
+          : sourceCaption?.payload.kind === "update_caption"
+            ? sourceCaption.payload.text
+            : action.payload.text;
+      const translatedText = await options.translateCaptionText!({
+        text: sourceText,
+        sourceLanguage: action.payload.sourceLanguage,
+        targetLanguage: action.payload.targetLanguage
+      });
+
+      return LiveActionSchema.parse({
+        ...action,
+        reason: `${action.reason} Translation provider is server-owned.`,
+        payload: {
+          ...action.payload,
+          text: translatedText
+        }
+      });
+    })
+  );
+}
+
+async function routeRuntimeEventInternal(
+  event: RuntimeEvent,
+  session: LiveSessionSpec,
+  options: RuntimeRouteOptions
+) {
+  const context = buildContextEnvelope(event, session);
+  const actions = await applyRuntimeServices(decideActions(context), event, options);
+  const toolResults = executeFakeAdapters(actions);
+  const auditEvents = [
+    ...createAuditEvents(event, context, actions),
+    ...toolResults.map((toolResult) =>
+      AuditEventSchema.parse({
+        auditId: `audit-${toolResult.actionId}-${toolResult.adapter}`,
+        sessionId: event.sessionId,
+        timestamp: now(),
+        kind: "tool_result",
+        actor: toolResult.adapter === "fake-overlay" ? "overlay" : "extension",
+        reason: "Fake adapter executed deterministic command.",
+        toolResult
+      })
+    )
+  ];
+  const overlayState = applyOverlayActions(
+    session,
+    actions,
+    options.previousOverlayState ?? createInitialOverlayState(session)
+  );
+
+  return {
+    context,
+    actions,
+    toolResults,
+    auditEvents,
+    overlayState
+  };
+}
+
 export function routeRuntimeEvent(event: RuntimeEvent, session: LiveSessionSpec) {
   const context = buildContextEnvelope(event, session);
   const actions = decideActions(context);
@@ -413,4 +570,12 @@ export function routeRuntimeEvent(event: RuntimeEvent, session: LiveSessionSpec)
     auditEvents,
     overlayState
   };
+}
+
+export function routeRuntimeEventAsync(
+  event: RuntimeEvent,
+  session: LiveSessionSpec,
+  options: RuntimeRouteOptions = {}
+) {
+  return routeRuntimeEventInternal(event, session, options);
 }
