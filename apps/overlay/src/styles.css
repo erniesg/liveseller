@@ -130,7 +130,7 @@ body {
   align-self: end;
   justify-self: end;
   display: grid;
-  grid-template-columns: repeat(2, minmax(118px, auto)) auto auto;
+  grid-template-columns: repeat(2, minmax(118px, auto)) auto auto auto;
   gap: 8px;
   align-items: center;
   max-width: min(100%, 560px);
@@ -139,6 +139,26 @@ body {
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.82);
   box-shadow: 0 14px 40px rgba(2, 6, 23, 0.22);
+}
+
+.host-log {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  max-height: 88px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.68rem;
+  list-style: none;
+}
+
+.host-log li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .host-controls select,
@@ -165,6 +185,24 @@ body {
   background: #22c55e;
   color: #052e16;
   font-weight: 800;
+}
+
+.audio-toggle {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 6px;
+  align-items: center;
+  min-height: 36px;
+  color: #d1fae5;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.audio-toggle input {
+  min-height: auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
 }
 
 .host-controls span {
