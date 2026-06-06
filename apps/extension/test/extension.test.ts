@@ -468,6 +468,7 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Go Live in Shopee Seller Centre");
     expect(sidePanel).toContain("does not press Go Live");
     expect(sidePanel).toContain("Shopee Live setup URL");
+    expect(sidePanel).toContain("Codex operator origin");
     expect(sidePanel).toContain("Public overlay browser-source URL");
     expect(sidePanel).toContain("Seller camera compositor preview URL");
     expect(sidePanel).toContain("Open Shopee Live setup");
@@ -485,12 +486,18 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Product script suggestion");
     expect(sidePanel).toContain("Load scripts");
     expect(sidePanel).toContain("Start realtime agent");
+    expect(sidePanel).toContain("Codex app-server operator");
+    expect(sidePanel).toContain("Ask operator");
+    expect(sidePanel).toContain("Generate image edits");
+    expect(sidePanel).toContain("Build create_product commands");
     expect(sidePanel).toContain("Verify Shopee camera/video preview and overlay feed manually.");
     expect(sidePanel).toContain('script src="sidepanel.js"');
     expect(sidePanelScript).toContain("/api/prep/review-plan/");
     expect(sidePanelScript).toContain("createIntakeReviewDraft");
     expect(sidePanelScript).toContain("extension_side_panel_drag_drop");
     expect(sidePanelScript).toContain("/api/prep/review-decisions");
+    expect(sidePanelScript).toContain("/api/operator/seller-review-turn");
+    expect(sidePanelScript).toContain("/api/operator/review-tools");
     expect(sidePanelScript).toContain("/api/runtime/events");
     expect(sidePanelScript).toContain("/api/runtime/realtime/agent-session");
     expect(sidePanelScript).toContain("/api/live-sessions/");
@@ -505,6 +512,7 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("/api/overlay/");
     expect(sidePanelScript).toContain("sendLowRiskReplyThroughShopeeTab");
     expect(sidePanelScript).toContain("queueShopeeProductCreation");
+    expect(sidePanelScript).toContain("operatorBuildCreateProducts");
     expect(sidePanelScript).toContain("updateLaunchChecklist");
     expect(sidePanelScript).toContain("present_redacted");
     expect(background).toContain("liveseller:lastViewerMessage");

@@ -10,6 +10,7 @@ import {
   runCodexAppServerReviewSession
 } from "../src/codexAppServerReview";
 import { createJsonLineCodexAppServerTransport } from "../src/codexAppServerTransport";
+import { createOperatorHttpServer } from "../src/server";
 
 describe("Codex app-server operator review loop", () => {
   it("starts a Codex app-server review turn with LiveSeller domain tools", () => {
@@ -269,5 +270,96 @@ describe("Codex app-server operator review loop", () => {
       done: true,
       value: undefined
     });
+  });
+
+  it("serves extension-callable operator turns for plan edits and image outputs", async () => {
+    const server = createOperatorHttpServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected local HTTP server address");
+    }
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/operator/seller-review-turn`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reviewPlan: validProductReviewPlan,
+          sellerText: "Make the title shorter and generate another background image option."
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.interpretedCalls).toContain("liveseller_record_seller_review_response");
+      expect(body.interpretedCalls).toContain("liveseller_apply_ai_draft_update");
+      expect(body.interpretedCalls).toContain("liveseller_generate_image_edits");
+      expect(body.reviewPlan.items[0].reviewRounds).toHaveLength(2);
+      expect(body.reviewPlan.generationTasks.some((task: { outputRefs: string[] }) =>
+        task.outputRefs.some((ref) => ref.startsWith("generated/operator-"))
+      )).toBe(true);
+      expect(body.createProductCommands).toEqual([]);
+      expect(body.operatorEvents.map((event: { type: string }) => event.type)).toContain("turn_completed");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("exposes create-product command building only after seller approval", async () => {
+    const server = createOperatorHttpServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected local HTTP server address");
+    }
+    const url = `http://127.0.0.1:${address.port}/api/operator/review-tools`;
+
+    try {
+      const blocked = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reviewPlan: validProductReviewPlan,
+          calls: [{ tool: "liveseller_build_create_product_commands", arguments: {} }]
+        })
+      });
+      expect(blocked.status).toBe(200);
+      expect((await blocked.json()).createProductCommands).toEqual([]);
+
+      const approvedDecision: ProductReviewDecision = {
+        decisionId: "decision-http-approved",
+        productId: validProductReviewPlan.items[0]!.productId,
+        status: "approved",
+        decidedBy: "seller",
+        decidedAt: "2026-06-06T06:15:00.000Z",
+        reason: "Seller approved from the extension operator bridge.",
+        citations: validProductReviewPlan.items[0]!.product.evidence
+      };
+      const approved = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reviewPlan: validProductReviewPlan,
+          calls: [
+            {
+              tool: "liveseller_record_product_review_decision",
+              arguments: { decision: approvedDecision }
+            },
+            { tool: "liveseller_build_create_product_commands", arguments: {} }
+          ]
+        })
+      });
+      expect(approved.status).toBe(200);
+      const body = await approved.json();
+      expect(body.createProductCommands).toHaveLength(1);
+      expect(body.createProductCommands[0]).toMatchObject({
+        kind: "create_product",
+        approvalDecisionId: approvedDecision.decisionId,
+        approvalStatus: "approved"
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 });

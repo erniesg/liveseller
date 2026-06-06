@@ -11,13 +11,18 @@
     "./transport": {
       "types": "./src/codexAppServerTransport.ts",
       "import": "./src/codexAppServerTransport.ts"
+    },
+    "./server": {
+      "types": "./src/server.ts",
+      "import": "./src/server.ts"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "demo": "tsx src/demo.ts",
+    "dev": "tsx src/server.ts",
     "live:daemon:prep": "tsx src/liveDaemonValidation.ts",
-    "test": "vitest run apps/operator/test"
+    "test": "vitest run --root ../.. --config vitest.config.ts apps/operator/test/operator.test.ts"
   },
   "dependencies": {
     "@liveseller/contracts": "0.1.0",

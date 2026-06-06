@@ -22,6 +22,10 @@ function runtimeOrigin() {
   return $("#runtime-origin").value.trim().replace(/\/$/u, "") || "http://127.0.0.1:8787";
 }
 
+function operatorOrigin() {
+  return $("#operator-origin").value.trim().replace(/\/$/u, "") || "http://127.0.0.1:8788";
+}
+
 function reviewSessionId() {
   return $("#review-session-id").value.trim() || "live-seed-001";
 }
@@ -79,6 +83,18 @@ function inferProductName(fileName) {
 
 async function fetchJson(path, options = {}) {
   const response = await fetch(`${runtimeOrigin()}${path}`, {
+    headers: { "content-type": "application/json", ...(options.headers || {}) },
+    ...options
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.message || body.error || `HTTP ${response.status}`);
+  }
+  return body;
+}
+
+async function fetchOperatorJson(path, options = {}) {
+  const response = await fetch(`${operatorOrigin()}${path}`, {
     headers: { "content-type": "application/json", ...(options.headers || {}) },
     ...options
   });
@@ -835,6 +851,81 @@ function renderCodexEvents() {
   }
 }
 
+function applyOperatorResult(result) {
+  state.reviewPlan = result.reviewPlan || state.reviewPlan;
+  state.createProductCommands = result.createProductCommands || state.createProductCommands;
+  renderReviewPlan();
+  renderCommands();
+  $("#codex-events-json").value = JSON.stringify({
+    threadId: result.threadId,
+    events: result.operatorEvents || []
+  }, null, 2);
+  renderCodexEvents();
+  writeLog("#operator-result-log", {
+    status: "operator_turn_applied",
+    reviewPlanStatus: state.reviewPlan?.status,
+    createProductCommandCount: state.createProductCommands.length,
+    interpretedCalls: result.interpretedCalls,
+    events: (result.operatorEvents || []).map((event) => ({
+      type: event.type,
+      tool: event.tool,
+      message: event.message
+    }))
+  });
+}
+
+function requireServerReviewPlan() {
+  if (!state.reviewPlan) {
+    throw new Error("Load a server-backed review plan before using the Codex operator.");
+  }
+  return state.reviewPlan;
+}
+
+async function requestCodexOperator() {
+  const reviewPlan = requireServerReviewPlan();
+  const result = await fetchOperatorJson("/api/operator/seller-review-turn", {
+    method: "POST",
+    body: JSON.stringify({
+      reviewPlan,
+      createProductCommands: state.createProductCommands,
+      sellerText: $("#operator-seller-request").value.trim() || "Generate another image option."
+    })
+  });
+  applyOperatorResult(result);
+}
+
+async function operatorGenerateImages() {
+  const reviewPlan = requireServerReviewPlan();
+  const result = await fetchOperatorJson("/api/operator/review-tools", {
+    method: "POST",
+    body: JSON.stringify({
+      reviewPlan,
+      createProductCommands: state.createProductCommands,
+      calls: [{
+        tool: "liveseller_generate_image_edits",
+        arguments: {}
+      }]
+    })
+  });
+  applyOperatorResult(result);
+}
+
+async function operatorBuildCreateProducts() {
+  const reviewPlan = requireServerReviewPlan();
+  const result = await fetchOperatorJson("/api/operator/review-tools", {
+    method: "POST",
+    body: JSON.stringify({
+      reviewPlan,
+      createProductCommands: state.createProductCommands,
+      calls: [{
+        tool: "liveseller_build_create_product_commands",
+        arguments: {}
+      }]
+    })
+  });
+  applyOperatorResult(result);
+}
+
 $("#load-review-plan").addEventListener("click", () => void loadReviewPlan().catch((error) => writeLog("#review-status", error.message)));
 $("#approve-all").addEventListener("click", () => void approveAll().catch((error) => writeLog("#command-log", error.message)));
 $("#intake-file-input").addEventListener("change", (event) => addIntakeFiles(event.target.files || []));
@@ -870,6 +961,9 @@ $("#start-realtime-agent").addEventListener("click", () => void startRealtimeAge
 $("#load-product-scripts").addEventListener("click", () => void loadProductScripts().catch((error) => writeLog("#script-suggestion-log", error.message)));
 $("#use-captured-message").addEventListener("click", () => void useCapturedMessage());
 $("#render-codex-events").addEventListener("click", renderCodexEvents);
+$("#request-codex-operator").addEventListener("click", () => void requestCodexOperator().catch((error) => writeLog("#operator-result-log", error.message)));
+$("#operator-generate-images").addEventListener("click", () => void operatorGenerateImages().catch((error) => writeLog("#operator-result-log", error.message)));
+$("#operator-build-create-products").addEventListener("click", () => void operatorBuildCreateProducts().catch((error) => writeLog("#operator-result-log", error.message)));
 
 void checkRuntime().catch(() => undefined);
 renderIntake();

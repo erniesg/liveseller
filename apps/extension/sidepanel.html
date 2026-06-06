@@ -22,6 +22,10 @@
           <input id="runtime-origin" value="http://127.0.0.1:8787" />
         </label>
         <label>
+          Codex operator origin
+          <input id="operator-origin" value="http://127.0.0.1:8788" />
+        </label>
+        <label>
           Review session
           <input id="review-session-id" value="live-seed-001" />
         </label>
@@ -230,7 +234,22 @@
       </section>
 
       <section id="liveseller-codex-operator" class="panel" aria-label="Codex operator events" aria-live="polite">
-        <h2>Codex app-server events</h2>
+        <div class="section-heading">
+          <div>
+            <h2>Codex app-server operator</h2>
+            <p>Ask the operator to edit the review plan, generate image-edit outputs, and build create_product commands after approval.</p>
+          </div>
+          <button id="request-codex-operator" type="button">Ask operator</button>
+        </div>
+        <label>
+          Seller request
+          <textarea id="operator-seller-request" rows="3">Make the title shorter and generate another background image option.</textarea>
+        </label>
+        <div class="button-row">
+          <button id="operator-generate-images" type="button">Generate image edits</button>
+          <button id="operator-build-create-products" type="button">Build create_product commands</button>
+        </div>
+        <div id="operator-result-log" class="log">No operator turn run yet.</div>
         <textarea id="codex-events-json" rows="5" placeholder='Paste Codex app-server events JSON here'></textarea>
         <button id="render-codex-events" type="button">Render Codex events</button>
         <div id="codex-event-log" class="stack">No Codex app-server session events yet.</div>
