@@ -14,6 +14,7 @@ LiveSeller is a hackathon-ready Shopee Live commerce copilot. It turns seller up
 ## Repo Workflow
 
 - `main` is the stable integration branch.
+- 5-hour hackathon checkpoints live in `docs/5-hour-hackathon.md`.
 - Definitions of done live in `docs/definition-of-done.md`.
 - Planning context lives in `docs/planning-context.md`.
 - Stack decisions live in `docs/tech-stack.md`.

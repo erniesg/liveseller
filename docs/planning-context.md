@@ -8,6 +8,8 @@ LiveSeller turns one Shopee Live-style seller into a multilingual live commerce 
 
 For SEAxOpenAI, the project should demonstrate an autonomous and adaptive AI agent that can operate reliably under real-world live-commerce uncertainty while keeping irreversible or risky actions under seller control.
 
+The timeboxed owner/checkpoint plan for the 5-hour build lives in `docs/5-hour-hackathon.md`.
+
 ## Team Lanes
 
 - Lane 1: Prep + Catalog Brain

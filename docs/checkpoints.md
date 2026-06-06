@@ -1,5 +1,7 @@
 # Checkpoints
 
+For the SEAxOpenAI 5-hour build, use `docs/5-hour-hackathon.md` as the timeboxed operating plan. This file remains the durable checkpoint reference.
+
 ## Contract Freeze
 
 Done when:
