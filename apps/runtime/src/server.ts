@@ -19,6 +19,7 @@ import {
   recordProductReviewDecision
 } from "./approvals";
 import { createRuntimeSessionStore } from "./sessionStore";
+import { createSellerTimelineStore, runtimeEventTimelineEntry } from "./sellerTimeline";
 
 const sessionStores = new Map(
   [validLiveSessionSpec, vintageJewelryLiveSessionSpec].map((session) => [
@@ -26,6 +27,8 @@ const sessionStores = new Map(
     createRuntimeSessionStore(session)
   ])
 );
+const sellerTimeline = createSellerTimelineStore();
+const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
 
 export function loadRuntimeEnvFile(cwd = process.cwd()): { path?: string; loadedKeys: string[] } {
   const envPath = join(cwd, ".env");
@@ -100,9 +103,12 @@ export async function createRealtimeClientSecret(options: {
     body: JSON.stringify({
       session: {
         type: "realtime",
-        model: options.model ?? process.env.OPENAI_REALTIME_MODEL ?? "gpt-realtime",
+        model: options.model ?? process.env.OPENAI_REALTIME_MODEL ?? DEFAULT_REALTIME_MODEL,
         instructions:
           "Translate Shopee Live host speech for shoppers. Keep product names, prices, stock counts, and promo terms exact. Do not invent offers.",
+        reasoning: {
+          effort: "low"
+        },
         audio: {
           output: {
             voice: options.voice ?? process.env.OPENAI_REALTIME_VOICE ?? "marin"
@@ -173,8 +179,11 @@ export async function createRealtimeAgentSession(input: {
     body: JSON.stringify({
       session: {
         type: "realtime",
-        model: input.model ?? process.env.OPENAI_REALTIME_MODEL ?? "gpt-realtime",
+        model: input.model ?? process.env.OPENAI_REALTIME_MODEL ?? DEFAULT_REALTIME_MODEL,
         instructions: realtimeAgentInstructions(session),
+        reasoning: {
+          effort: "low"
+        },
         audio: {
           output: {
             voice: input.voice ?? process.env.OPENAI_REALTIME_VOICE ?? "marin"
@@ -518,6 +527,32 @@ function sendHtml(res: import("node:http").ServerResponse, status: number, html:
   res.end(html);
 }
 
+function sendSellerTimelineStream(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse
+) {
+  const url = new URL(req.url ?? "/", runtimeOrigin(req));
+  const sessionId = url.searchParams.get("sessionId") || undefined;
+  const after = Number(url.searchParams.get("after") ?? "0");
+  res.writeHead(200, {
+    "access-control-allow-origin": "*",
+    "cache-control": "no-cache, no-transform",
+    "connection": "keep-alive",
+    "content-type": "text/event-stream"
+  });
+  res.write(`event: snapshot\ndata: ${JSON.stringify(sellerTimeline.list({
+    after: Number.isFinite(after) ? after : 0,
+    sessionId
+  }))}\n\n`);
+  const unsubscribe = sellerTimeline.subscribe((event, cursor) => {
+    if (sessionId && event.sessionId !== sessionId) {
+      return;
+    }
+    res.write(`event: timeline\ndata: ${JSON.stringify({ event, cursor })}\n\n`);
+  });
+  req.on("close", unsubscribe);
+}
+
 function runtimeOrigin(req: import("node:http").IncomingMessage) {
   return `http://${req.headers.host ?? "127.0.0.1:8787"}`;
 }
@@ -615,6 +650,21 @@ export function createRuntimeServer() {
         return;
       }
 
+      if (req.method === "GET" && req.url?.startsWith("/api/seller-timeline/events")) {
+        const url = new URL(req.url, runtimeOrigin(req));
+        const after = Number(url.searchParams.get("after") ?? "0");
+        sendJson(res, 200, sellerTimeline.list({
+          after: Number.isFinite(after) ? after : 0,
+          sessionId: url.searchParams.get("sessionId") || undefined
+        }));
+        return;
+      }
+
+      if (req.method === "GET" && req.url?.startsWith("/api/seller-timeline/stream")) {
+        sendSellerTimelineStream(req, res);
+        return;
+      }
+
       if (req.method === "GET" && req.url?.startsWith("/camera-compositor/preview")) {
         sendHtml(res, 200, compositorPreviewHtml(req));
         return;
@@ -663,33 +713,59 @@ export function createRuntimeServer() {
           return;
         }
         const routed = store.route(event);
+        sellerTimeline.append(runtimeEventTimelineEntry(event));
+        for (const action of routed.actions) {
+          sellerTimeline.append({
+            service: "runtime",
+            sessionId: event.sessionId,
+            kind: "runtime_action",
+            status: action.requiresApproval ? "warning" : "success",
+            title: action.type,
+            detail: action.reason,
+            subjectId: action.actionId,
+            sourceEventId: event.eventId,
+            approvalState: action.requiresApproval ? "pending" : "none"
+          });
+        }
         sendJson(res, 200, routed);
         return;
       }
 
       if (req.method === "POST" && req.url === "/api/runtime/realtime/session") {
         const session = await createRealtimeClientSecret();
+        sellerTimeline.append({
+          service: "runtime",
+          kind: "realtime",
+          status: session.status >= 200 && session.status < 300 ? "success" : "error",
+          title: "Realtime client secret request",
+          detail: session.status >= 200 && session.status < 300
+            ? "Server minted an ephemeral client secret without exposing the OpenAI API key."
+            : "Realtime client secret request failed; check runtime server OpenAI configuration.",
+          redacted: true
+        });
         sendJson(res, session.status, session.body);
         return;
       }
 
       if (req.method === "POST" && req.url === "/api/runtime/realtime/agent-session") {
         const body = await readJson(req);
+        const sessionId = String(body.sessionId ?? validLiveSessionSpec.sessionId);
         const session = await createRealtimeAgentSession({
-          sessionId: String(body.sessionId ?? validLiveSessionSpec.sessionId),
+          sessionId,
           voice: typeof body.voice === "string" ? body.voice : undefined
+        });
+        sellerTimeline.append({
+          service: "runtime",
+          sessionId,
+          kind: "realtime",
+          status: session.status >= 200 && session.status < 300 ? "success" : "error",
+          title: "RealtimeAgent session requested",
+          detail: session.status >= 200 && session.status < 300
+            ? "Ephemeral RealtimeAgent session is ready for the seller-private UI."
+            : "RealtimeAgent session failed; server-side OpenAI configuration may be missing.",
+          redacted: true
         });
         sendJson(res, session.status, session.body);
-        return;
-      }
-
-      if (req.method === "POST" && req.url === "/api/runtime/realtime/agent-session") {
-        const body = await readJson(req);
-        const result = await createRealtimeAgentSession({
-          sessionId: String(body.sessionId ?? ""),
-          voice: typeof body.voice === "string" ? body.voice : undefined
-        });
-        sendJson(res, result.status, result.body);
         return;
       }
 
@@ -700,6 +776,14 @@ export function createRuntimeServer() {
           rtmpKey: String(body.rtmpKey ?? ""),
           overlayUrl: String(body.overlayUrl ?? ""),
           durationSeconds: Number.isFinite(body.durationSeconds) ? Number(body.durationSeconds) : undefined
+        });
+        sellerTimeline.append({
+          service: "runtime",
+          kind: "stream",
+          status: "success",
+          title: "Overlay stream smoke sent",
+          detail: `${result.durationSeconds} seconds to ${result.overlayUrl}`,
+          redacted: true
         });
         sendJson(res, 200, result);
         return;
@@ -722,6 +806,14 @@ export function createRuntimeServer() {
           cameraInput: typeof body.cameraInput === "string" ? body.cameraInput : undefined,
           waitForCompletion: false
         });
+        sellerTimeline.append({
+          service: "runtime",
+          kind: "stream",
+          status: "success",
+          title: "Camera and overlay publisher started",
+          detail: `${result.outputSize} ${result.outputOrientation} stream to Shopee preview.`,
+          redacted: true
+        });
         sendJson(res, 200, result);
         return;
       }
@@ -732,7 +824,16 @@ export function createRuntimeServer() {
       }
 
       if (req.method === "POST" && req.url === "/api/shopee/runtime-compositor/stop") {
-        sendJson(res, 200, stopRuntimeCameraCompositor());
+        const status = stopRuntimeCameraCompositor();
+        sellerTimeline.append({
+          service: "runtime",
+          kind: "stream",
+          status: status.state === "idle" ? "info" : "success",
+          title: "Camera and overlay publisher stopped",
+          detail: status.state,
+          redacted: true
+        });
+        sendJson(res, 200, status);
         return;
       }
 
@@ -746,6 +847,16 @@ export function createRuntimeServer() {
         const startLivestreamCommands = store
           ? buildShopeeStartLivestreamCommands(updatedReviewPlan, store.snapshot().session)
           : [];
+        sellerTimeline.append({
+          service: "runtime",
+          sessionId: updatedReviewPlan.sessionId,
+          kind: "product_creation",
+          status: "success",
+          title: "Seller review decision recorded",
+          detail: `${decision.status}; ${createProductCommands.length} create_product command(s) ready.`,
+          subjectId: decision.productId,
+          approvalState: decision.status === "rejected" ? "rejected" : "approved"
+        });
         sendJson(res, 200, {
           reviewPlan: updatedReviewPlan,
           createProductCommands,
@@ -808,7 +919,17 @@ export function createRuntimeServer() {
         const body = await readJson(req);
         const current = store.overlay();
         const background = OverlayStateSchema.shape.background.unwrap().parse(body.background);
-        sendJson(res, 200, store.updateOverlayBackground(background) ?? current);
+        const next = store.updateOverlayBackground(background) ?? current;
+        sellerTimeline.append({
+          service: "runtime",
+          sessionId: overlayBackgroundSessionId,
+          kind: "overlay",
+          status: "success",
+          title: "Overlay background changed",
+          detail: background.label,
+          redacted: false
+        });
+        sendJson(res, 200, next);
         return;
       }
 

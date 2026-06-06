@@ -1105,6 +1105,44 @@ export const AuditEventSchema = z
   .strict();
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
+export const SellerTimelineEventSchema = z
+  .object({
+    id: z.string().min(1),
+    timestamp: z.string().datetime(),
+    service: z.enum(["runtime", "operator", "extension", "shopee"]),
+    sessionId: z.string().min(1).optional(),
+    kind: z.enum([
+      "runtime_event",
+      "runtime_action",
+      "realtime",
+      "overlay",
+      "stream",
+      "operator",
+      "shopee_action",
+      "product_creation",
+      "viewer_message",
+      "system"
+    ]),
+    status: z.enum(["info", "success", "warning", "error"]),
+    title: z.string().min(1),
+    detail: z.string().min(1).optional(),
+    subjectId: z.string().min(1).optional(),
+    sourceEventId: z.string().min(1).optional(),
+    tool: z.string().min(1).optional(),
+    approvalState: z.enum(["none", "pending", "approved", "rejected", "blocked"]).optional(),
+    redacted: z.boolean().default(false)
+  })
+  .strict();
+export type SellerTimelineEvent = z.infer<typeof SellerTimelineEventSchema>;
+
+export const SellerTimelineResponseSchema = z
+  .object({
+    events: z.array(SellerTimelineEventSchema),
+    nextCursor: z.number().int().nonnegative()
+  })
+  .strict();
+export type SellerTimelineResponse = z.infer<typeof SellerTimelineResponseSchema>;
+
 export const OverlayStateSchema = z
   .object({
     sessionId: z.string().min(1),

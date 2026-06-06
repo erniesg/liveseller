@@ -16,6 +16,7 @@ import type {
   SellerFreeFormReviewResponse,
   SellerGuidance,
   SellerReviewRound,
+  SellerTimelineEvent,
   SellerUiPolicy,
   ShopeeCreateProductCommand,
   ShopeeStartLivestreamCommand,
@@ -1104,6 +1105,21 @@ export const validAuditEvent: AuditEvent = {
   actor: "runtime",
   reason: "Runtime emitted low-risk factual action.",
   action: validLiveAction
+};
+
+export const validSellerTimelineEvent: SellerTimelineEvent = {
+  id: "timeline-viewer-message",
+  timestamp: now,
+  service: "runtime",
+  sessionId: validLiveSessionSpec.sessionId,
+  kind: "viewer_message",
+  status: "success",
+  title: "Viewer message from Alicia",
+  detail: "How much is the bamboo tee?",
+  subjectId: "viewer-001",
+  sourceEventId: "event-chat-price",
+  approvalState: "none",
+  redacted: false
 };
 
 export const badFixtures = {

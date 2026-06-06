@@ -13,6 +13,7 @@ import {
   RuntimeEventSchema,
   SQLITE_SCHEMA,
   SellerFreeFormReviewResponseSchema,
+  SellerTimelineEventSchema,
   SessionMemorySchema,
   ShopeeCreateProductCommandSchema,
   ShopeeStartLivestreamCommandSchema,
@@ -28,6 +29,7 @@ import {
   validPromo,
   validRuntimeEvents,
   validSellerFreeFormReviewResponse,
+  validSellerTimelineEvent,
   validShopeeCreateProductCommand,
   validShopeeStartLivestreamCommand,
   validSessionMemory,
@@ -52,6 +54,7 @@ describe("contract freeze", () => {
     expect(() => ProductReviewPlanSchema.parse(validProductReviewPlan)).not.toThrow();
     expect(() => AiDraftUpdateSchema.parse(validAiDraftUpdate)).not.toThrow();
     expect(() => SellerFreeFormReviewResponseSchema.parse(validSellerFreeFormReviewResponse)).not.toThrow();
+    expect(() => SellerTimelineEventSchema.parse(validSellerTimelineEvent)).not.toThrow();
     expect(() => {
       validProductReviewPlan.generationTasks.forEach((task) => PrepGenerationTaskSchema.parse(task));
     }).not.toThrow();

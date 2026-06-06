@@ -469,6 +469,9 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("does not press Go Live");
     expect(sidePanel).toContain("Shopee Live setup URL");
     expect(sidePanel).toContain("Codex operator origin");
+    expect(sidePanel).toContain('id="liveseller-seller-timeline"');
+    expect(sidePanel).toContain("Seller timeline");
+    expect(sidePanel).toContain("Refresh timeline");
     expect(sidePanel).toContain("Public overlay browser-source URL");
     expect(sidePanel).toContain("Seller camera compositor preview URL");
     expect(sidePanel).toContain("Open Shopee Live setup");
@@ -498,12 +501,16 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("/api/prep/review-decisions");
     expect(sidePanelScript).toContain("/api/operator/seller-review-turn");
     expect(sidePanelScript).toContain("/api/operator/review-tools");
+    expect(sidePanelScript).toContain("/api/operator/events");
+    expect(sidePanelScript).toContain("/api/seller-timeline/events");
+    expect(sidePanelScript).toContain("refreshSellerTimeline");
     expect(sidePanelScript).toContain("/api/runtime/events");
     expect(sidePanelScript).toContain("/api/runtime/realtime/agent-session");
     expect(sidePanelScript).toContain("@openai/agents-realtime");
     expect(sidePanelScript).toContain("RealtimeAgent");
     expect(sidePanelScript).toContain("RealtimeSession");
     expect(sidePanelScript).toContain('transport: "webrtc"');
+    expect(sidePanelScript).toContain("gpt-realtime-2");
     expect(sidePanelScript).toContain("show_overlay_background");
     expect(sidePanelScript).toContain("send_policy_checked_reply");
     expect(sidePanelScript).toContain("/api/live-sessions/");

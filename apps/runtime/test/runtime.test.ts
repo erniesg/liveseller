@@ -7,6 +7,7 @@ import {
   type LanguageCode,
   type RuntimeEvent,
   LiveActionSchema,
+  SellerTimelineResponseSchema,
   ShopeeCreateProductCommandSchema,
   validSellerFreeFormReviewResponse,
   validProductReviewPlan,
@@ -60,7 +61,7 @@ describe("live brain policy runtime", () => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_REALTIME_MODEL;
     try {
-      writeFileSync(join(dir, ".env"), "OPENAI_API_KEY=env-test-key\nOPENAI_REALTIME_MODEL=gpt-realtime\n");
+      writeFileSync(join(dir, ".env"), "OPENAI_API_KEY=env-test-key\nOPENAI_REALTIME_MODEL=gpt-realtime-2\n");
       const loaded = loadRuntimeEnvFile(dir);
 
       expect(loaded).toMatchObject({
@@ -225,6 +226,9 @@ describe("live brain policy runtime", () => {
       session: {
         type: "realtime",
         model: "gpt-realtime",
+        reasoning: {
+          effort: "low"
+        },
         audio: {
           output: {
             voice: "marin"
@@ -274,6 +278,8 @@ describe("live brain policy runtime", () => {
       expect.objectContaining({ method: "POST" })
     );
     const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.session.model).toBe("gpt-realtime-2");
+    expect(body.session.reasoning).toEqual({ effort: "low" });
     expect(body.session.instructions).toContain("RealtimeAgent");
     expect(body.session.instructions).toContain("translate host speech to English audio");
     expect(body.session.instructions).toContain("prompt the seller what to say next");
@@ -856,6 +862,52 @@ describe("live brain policy runtime", () => {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       });
+    }
+  });
+
+  it("records seller timeline events for runtime routing and approval progress", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const origin = `http://127.0.0.1:${address.port}`;
+      const event = viewerEvent("How much is the Bamboo Cooling Tee?", "en");
+      const routed = await fetch(`${origin}/api/runtime/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(event)
+      });
+      expect(routed.status).toBe(200);
+
+      const timelineResponse = await fetch(
+        `${origin}/api/seller-timeline/events?sessionId=${validLiveSessionSpec.sessionId}`
+      );
+      expect(timelineResponse.status).toBe(200);
+      const timeline = SellerTimelineResponseSchema.parse(await timelineResponse.json());
+      expect(timeline.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            service: "runtime",
+            kind: "viewer_message",
+            title: "Viewer message from Test Viewer",
+            sourceEventId: event.eventId,
+            redacted: false
+          }),
+          expect.objectContaining({
+            service: "runtime",
+            kind: "runtime_action",
+            status: "success",
+            approvalState: "none"
+          })
+        ])
+      );
+      expect(JSON.stringify(timeline)).not.toContain("sk-");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
   });
 

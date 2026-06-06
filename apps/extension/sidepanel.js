@@ -1,4 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
+const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
 
 const state = {
   reviewPlan: undefined,
@@ -14,7 +15,10 @@ const state = {
   overlayPipeStarted: false,
   latestCompositorStatus: undefined,
   queuedProductCreation: [],
-  realtimeAgentConnected: false
+  realtimeAgentConnected: false,
+  sellerTimelineEvents: [],
+  sellerTimelineRuntimeCursor: 0,
+  sellerTimelineOperatorCursor: 0
 };
 
 let intakeImages = [];
@@ -113,6 +117,72 @@ async function checkRuntime() {
   } catch (error) {
     setConnection("Runtime offline", "error");
     throw error;
+  }
+}
+
+function timelineKey(event) {
+  return `${event.service || "unknown"}:${event.id || event.timestamp || Math.random()}`;
+}
+
+function renderSellerTimeline() {
+  const root = $("#seller-timeline-log");
+  root.replaceChildren();
+  const events = [...state.sellerTimelineEvents]
+    .sort((left, right) => String(right.timestamp || "").localeCompare(String(left.timestamp || "")))
+    .slice(0, 40);
+  if (events.length === 0) {
+    root.textContent = "No timeline events loaded.";
+    return;
+  }
+  for (const event of events) {
+    const card = document.createElement("article");
+    card.className = "suggestion-card timeline-card";
+    card.innerHTML = `
+      <div>
+        <span class="tag">${escapeHtml(event.service || "event")}</span>
+        <span class="tag">${escapeHtml(event.status || "info")}</span>
+      </div>
+      <strong>${escapeHtml(event.title || event.kind || "Timeline event")}</strong>
+      <p>${escapeHtml(event.detail || "")}</p>
+      <p>${escapeHtml(event.timestamp || "")}${event.tool ? ` - ${escapeHtml(event.tool)}` : ""}</p>
+    `;
+    root.append(card);
+  }
+}
+
+function mergeTimelineEvents(events) {
+  const byKey = new Map(state.sellerTimelineEvents.map((event) => [timelineKey(event), event]));
+  for (const event of events || []) {
+    byKey.set(timelineKey(event), event);
+  }
+  state.sellerTimelineEvents = [...byKey.values()]
+    .sort((left, right) => String(left.timestamp || "").localeCompare(String(right.timestamp || "")))
+    .slice(-120);
+  renderSellerTimeline();
+}
+
+async function refreshSellerTimeline() {
+  const sessionId = encodeURIComponent(liveSessionId());
+  const runtime = await fetchJson(
+    `/api/seller-timeline/events?after=${state.sellerTimelineRuntimeCursor}&sessionId=${sessionId}`
+  );
+  state.sellerTimelineRuntimeCursor = runtime.nextCursor ?? state.sellerTimelineRuntimeCursor;
+  mergeTimelineEvents(runtime.events || []);
+  try {
+    const response = await fetchOperatorJson(`/api/operator/events?after=${state.sellerTimelineOperatorCursor}`);
+    state.sellerTimelineOperatorCursor = response.nextCursor ?? state.sellerTimelineOperatorCursor;
+    mergeTimelineEvents(response.events || []);
+  } catch (error) {
+    mergeTimelineEvents([{
+      id: `operator-timeline-offline-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      service: "operator",
+      kind: "operator",
+      status: "warning",
+      title: "Operator timeline unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+      redacted: true
+    }]);
   }
 }
 
@@ -502,6 +572,7 @@ async function postRuntimeEvent(event) {
   });
   state.latestActions = response.actions || [];
   renderSuggestions(state.latestActions);
+  void refreshSellerTimeline().catch(() => undefined);
   return response;
 }
 
@@ -566,6 +637,7 @@ async function startRealtimeAgent() {
     sdk: sdkResult,
     note: "Connected with @openai/agents/realtime using a server-minted ephemeral client secret."
   });
+  void refreshSellerTimeline().catch(() => undefined);
   return response;
 }
 
@@ -658,7 +730,7 @@ async function connectOpenAiRealtimeAgent(response) {
     });
     const session = new RealtimeSession(agent, {
       transport: "webrtc",
-      model: response.session?.model || "gpt-realtime",
+      model: response.session?.model || DEFAULT_REALTIME_MODEL,
       config: {
         audio: response.session?.audio
       }
@@ -680,7 +752,7 @@ async function connectOpenAiRealtimeAgent(response) {
       connected: true,
       sdk: "@openai/agents/realtime",
       transport: "webrtc",
-      model: response.session?.model || "gpt-realtime",
+      model: response.session?.model || DEFAULT_REALTIME_MODEL,
       tools: ["show_overlay_background", "send_policy_checked_reply"]
     };
   } catch (error) {
@@ -774,6 +846,7 @@ function prepareLivestream() {
       goLivePressed: false
     }))
   });
+  void refreshSellerTimeline().catch(() => undefined);
 }
 
 async function aiPrepareShopeePreview() {
@@ -837,6 +910,7 @@ async function startOverlayPreviewPipe() {
     sellerPreviewUrl: cameraPreviewUrl(),
     goLivePressed: false
   });
+  void refreshSellerTimeline().catch(() => undefined);
   await refreshCameraStatus();
 }
 
@@ -858,6 +932,7 @@ async function stopOverlayPreviewPipe() {
   state.overlayPipeStarted = false;
   updateLaunchChecklist();
   writeLog("#camera-status-log", status);
+  void refreshSellerTimeline().catch(() => undefined);
 }
 
 async function applyOverlayBackground() {
@@ -878,6 +953,7 @@ async function applyOverlayBackground() {
     status: "overlay_background_updated",
     background: response.background
   });
+  void refreshSellerTimeline().catch(() => undefined);
 }
 
 async function sendLowRiskReplyThroughShopeeTab() {
@@ -933,6 +1009,7 @@ async function queueShopeeProductCreation() {
       commands: state.queuedProductCreation,
       result: response
     });
+    void refreshSellerTimeline().catch(() => undefined);
     return;
   }
   writeLog("#product-creation-log", {
@@ -940,6 +1017,7 @@ async function queueShopeeProductCreation() {
     commands: state.queuedProductCreation,
     note: "Chrome extension runtime is required to execute inside an authenticated Shopee seller tab."
   });
+  void refreshSellerTimeline().catch(() => undefined);
 }
 
 async function useCapturedMessage() {
@@ -999,6 +1077,7 @@ function applyOperatorResult(result) {
       message: event.message
     }))
   });
+  void refreshSellerTimeline().catch(() => undefined);
 }
 
 function requireServerReviewPlan() {
@@ -1088,10 +1167,12 @@ $("#start-realtime-agent").addEventListener("click", () => void startRealtimeAge
 $("#load-product-scripts").addEventListener("click", () => void loadProductScripts().catch((error) => writeLog("#script-suggestion-log", error.message)));
 $("#use-captured-message").addEventListener("click", () => void useCapturedMessage());
 $("#render-codex-events").addEventListener("click", renderCodexEvents);
+$("#refresh-seller-timeline").addEventListener("click", () => void refreshSellerTimeline().catch((error) => writeLog("#seller-timeline-log", error.message)));
 $("#request-codex-operator").addEventListener("click", () => void requestCodexOperator().catch((error) => writeLog("#operator-result-log", error.message)));
 $("#operator-generate-images").addEventListener("click", () => void operatorGenerateImages().catch((error) => writeLog("#operator-result-log", error.message)));
 $("#operator-build-create-products").addEventListener("click", () => void operatorBuildCreateProducts().catch((error) => writeLog("#operator-result-log", error.message)));
 
 void checkRuntime().catch(() => undefined);
+void refreshSellerTimeline().catch(() => undefined);
 renderIntake();
 updateLaunchChecklist();

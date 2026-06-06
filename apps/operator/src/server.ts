@@ -4,6 +4,8 @@ import { z } from "zod";
 import {
   ProductReviewPlanSchema,
   type ProductReviewPlan,
+  SellerTimelineEventSchema,
+  type SellerTimelineEvent,
   type ShopeeCreateProductCommand
 } from "@liveseller/contracts";
 import {
@@ -17,6 +19,7 @@ import {
 } from "./codexAppServerReview";
 
 const DEFAULT_PORT = 8788;
+const MAX_TIMELINE_EVENTS = 200;
 
 const ToolCallSchema = z.object({
   tool: z.enum(LIVESELLER_CODEX_REVIEW_TOOLS.map((tool) => tool.name) as [CodexReviewToolName, ...CodexReviewToolName[]]),
@@ -44,6 +47,40 @@ function json(res: ServerResponse, status: number, body: unknown): void {
     "content-type": "application/json"
   });
   res.end(JSON.stringify(body));
+}
+
+function createOperatorTimelineStore() {
+  const events: SellerTimelineEvent[] = [];
+  let cursor = 0;
+  return {
+    append(input: Omit<SellerTimelineEvent, "id" | "timestamp" | "service" | "redacted"> & {
+      id?: string;
+      timestamp?: string;
+      service?: SellerTimelineEvent["service"];
+      redacted?: boolean;
+    }) {
+      const { redacted, ...rest } = input;
+      const event = SellerTimelineEventSchema.parse({
+        service: "operator",
+        ...rest,
+        redacted: redacted ?? false,
+        id: input.id ?? `operator-timeline-${Date.now()}-${cursor + 1}`,
+        timestamp: input.timestamp ?? now()
+      });
+      events.push(event);
+      if (events.length > MAX_TIMELINE_EVENTS) {
+        events.splice(0, events.length - MAX_TIMELINE_EVENTS);
+      }
+      cursor += 1;
+      return event;
+    },
+    list(after = 0) {
+      return {
+        events: events.slice(Math.max(0, events.length - Math.max(0, cursor - after))),
+        nextCursor: cursor
+      };
+    }
+  };
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -193,6 +230,7 @@ function buildSellerTurnCalls(plan: ProductReviewPlan, sellerText: string, produ
 }
 
 export function createOperatorHttpServer() {
+  const timeline = createOperatorTimelineStore();
   return createServer(async (req, res) => {
     try {
       if (req.method === "OPTIONS") {
@@ -210,6 +248,12 @@ export function createOperatorHttpServer() {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/api/operator/events") {
+        const after = Number(url.searchParams.get("after") ?? "0");
+        json(res, 200, timeline.list(Number.isFinite(after) ? after : 0));
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/api/operator/review-tools") {
         const payload = ToolRequestSchema.parse(await readJson(req));
         const calls = payload.calls.map((call) => ({
@@ -223,6 +267,17 @@ export function createOperatorHttpServer() {
           },
           calls
         );
+        for (const event of result.operatorEvents) {
+          timeline.append({
+            kind: "operator",
+            status: event.type === "turn_completed" ? "success" : "info",
+            title: event.tool ? `${event.type}: ${event.tool}` : event.type,
+            detail: event.message,
+            tool: event.tool,
+            subjectId: event.callId,
+            redacted: true
+          });
+        }
         json(res, 200, result);
         return;
       }
@@ -237,6 +292,17 @@ export function createOperatorHttpServer() {
           },
           calls
         );
+        for (const event of result.operatorEvents) {
+          timeline.append({
+            kind: "operator",
+            status: event.type === "turn_completed" ? "success" : "info",
+            title: event.tool ? `${event.type}: ${event.tool}` : event.type,
+            detail: event.message,
+            tool: event.tool,
+            subjectId: event.callId,
+            redacted: true
+          });
+        }
         json(res, 200, {
           ...result,
           interpretedCalls: calls.map((call) => call.tool)

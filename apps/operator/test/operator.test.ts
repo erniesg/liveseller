@@ -1,5 +1,6 @@
 import {
   type ProductReviewDecision,
+  SellerTimelineResponseSchema,
   validProductReviewPlan,
   validSellerFreeFormReviewResponse
 } from "@liveseller/contracts";
@@ -301,6 +302,26 @@ describe("Codex app-server operator review loop", () => {
       )).toBe(true);
       expect(body.createProductCommands).toEqual([]);
       expect(body.operatorEvents.map((event: { type: string }) => event.type)).toContain("turn_completed");
+
+      const timelineResponse = await fetch(`http://127.0.0.1:${address.port}/api/operator/events`);
+      expect(timelineResponse.status).toBe(200);
+      const timeline = SellerTimelineResponseSchema.parse(await timelineResponse.json());
+      expect(timeline.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            service: "operator",
+            kind: "operator",
+            title: expect.stringContaining("tool_call_received"),
+            redacted: true
+          }),
+          expect.objectContaining({
+            service: "operator",
+            kind: "operator",
+            status: "success",
+            title: "turn_completed"
+          })
+        ])
+      );
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
