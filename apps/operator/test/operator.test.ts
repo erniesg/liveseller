@@ -29,6 +29,7 @@ describe("Codex app-server operator review loop", () => {
     expect(JSON.stringify(turn.turnStart.params.input)).toContain("ProductReviewPlan");
     expect(JSON.stringify(turn.turnStart.params.input)).toContain("Make the title shorter");
     expect(JSON.stringify(turn.turnStart.params.input)).toContain("liveseller_record_seller_review_response");
+    expect(JSON.stringify(turn.turnStart.params.input)).toContain("liveseller_generate_image_edits");
     expect(JSON.stringify(turn.turnStart.params.input)).toContain("liveseller_run_generation_tasks");
   });
 
@@ -79,6 +80,49 @@ describe("Codex app-server operator review loop", () => {
       )
     );
     expect(updated.createProductCommands).toEqual([]);
+  });
+
+  it("runs configured image edit worker through the app-server image tool", async () => {
+    const pendingTasks = validProductReviewPlan.generationTasks.filter((task) => task.status === "pending");
+    const updated = await executeCodexReviewToolCall(
+      { reviewPlan: validProductReviewPlan, createProductCommands: [] },
+      {
+        tool: "liveseller_generate_image_edits",
+        arguments: {}
+      },
+      {
+        imageEditRunner: async ({ reviewPlan }) => ({
+          completedAt: "2026-06-06T04:12:00.000Z",
+          taskOutputs: reviewPlan.generationTasks
+            .filter((task) => task.status === "pending")
+            .map((task) => ({
+              taskId: task.taskId,
+              outputRefs: [`generated/from-worker-${task.taskId}.png`]
+            }))
+        })
+      }
+    );
+
+    expect(updated.reviewPlan.generationTasks.filter((task) => task.taskType === "image_edit")).toEqual(
+      pendingTasks.map((task) =>
+        expect.objectContaining({
+          taskId: task.taskId,
+          status: "completed",
+          outputRefs: [`generated/from-worker-${task.taskId}.png`]
+        })
+      )
+    );
+    expect(updated.createProductCommands).toEqual([]);
+  });
+
+  it("rejects image edit tool calls when no worker is configured", async () => {
+    await expect(executeCodexReviewToolCall(
+      { reviewPlan: validProductReviewPlan, createProductCommands: [] },
+      {
+        tool: "liveseller_generate_image_edits",
+        arguments: {}
+      }
+    )).rejects.toThrow("No image edit runner is configured");
   });
 
   it("emits create-product commands only after Codex records a seller approval decision", async () => {

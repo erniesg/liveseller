@@ -26,6 +26,7 @@ import {
 export type CodexReviewToolName =
   | "liveseller_record_seller_review_response"
   | "liveseller_apply_ai_draft_update"
+  | "liveseller_generate_image_edits"
   | "liveseller_run_generation_tasks"
   | "liveseller_record_product_review_decision"
   | "liveseller_build_create_product_commands";
@@ -96,6 +97,16 @@ export const LIVESELLER_CODEX_REVIEW_TOOLS: CodexDynamicTool[] = [
     }
   },
   {
+    name: "liveseller_generate_image_edits",
+    description:
+      "Run the configured server-side image edit worker for pending image-edit tasks, then attach generated output refs to the ProductReviewPlan. Use when the seller asks for visual changes such as background cleanup.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    }
+  },
+  {
     name: "liveseller_record_product_review_decision",
     description:
       "Record the seller's final approve, reject, or edited decision for one reviewed product.",
@@ -151,6 +162,7 @@ export type CodexReviewTurnOptions = {
   threadId?: string;
   reviewPlan: ProductReviewPlan;
   sellerText: string;
+  imageEditRunner?: CodexImageEditRunner;
   onTrace?: (event: {
     direction: "in" | "out" | "operator";
     method?: string;
@@ -159,6 +171,17 @@ export type CodexReviewTurnOptions = {
     payload?: unknown;
   }) => void;
 };
+
+export type CodexImageEditRunner = (input: {
+  reviewPlan: ProductReviewPlan;
+}) => Promise<{
+  completedAt?: string;
+  taskOutputs: Array<{
+    taskId: string;
+    outputRefs: string[];
+    error?: string;
+  }>;
+}>;
 
 export type CodexReviewTurnMessages = {
   initialize: CodexJsonRpcRequest;
@@ -231,6 +254,8 @@ const GenerationTaskArgsSchema = z.object({
     }).strict()
   )
 }).strict();
+
+const GenerateImageEditsArgsSchema = z.object({}).strict();
 
 function buildReviewPrompt(options: CodexReviewTurnOptions): string {
   return [
@@ -430,7 +455,10 @@ export function buildCodexAppServerReviewTurn(options: CodexReviewTurnOptions): 
 
 export async function executeCodexReviewToolCall(
   state: CodexReviewToolState,
-  call: CodexReviewToolCall
+  call: CodexReviewToolCall,
+  options: {
+    imageEditRunner?: CodexImageEditRunner;
+  } = {}
 ): Promise<CodexReviewToolResult> {
   const normalizedArguments = normalizeReviewToolArguments(call);
   const parsedState: CodexReviewToolState = {
@@ -470,6 +498,32 @@ export async function executeCodexReviewToolCall(
         };
       },
       args.completedAt
+    );
+    const nextState = { ...parsedState, reviewPlan };
+    return { ...nextState, contentItems: content(call.tool, nextState) };
+  }
+
+  if (call.tool === "liveseller_generate_image_edits") {
+    const args = GenerateImageEditsArgsSchema.parse(normalizedArguments);
+    if (!options.imageEditRunner) {
+      throw new Error("No image edit runner is configured for liveseller_generate_image_edits");
+    }
+
+    const generated = await options.imageEditRunner({
+      reviewPlan: parsedState.reviewPlan,
+    });
+    const outputs = new Map(generated.taskOutputs.map((output) => [output.taskId, output]));
+    const reviewPlan = await runPendingPrepGenerationTasks(
+      parsedState.reviewPlan,
+      async (task) => {
+        const output = outputs.get(task.taskId);
+        return {
+          outputRefs: output?.outputRefs ?? [],
+          error: output?.error ?? (output ? undefined : `No image edit output supplied for ${task.taskId}`),
+          citations: task.citations
+        };
+      },
+      generated.completedAt
     );
     const nextState = { ...parsedState, reviewPlan };
     return { ...nextState, contentItems: content(call.tool, nextState) };
@@ -573,6 +627,8 @@ export async function runCodexAppServerReviewSession(
         result = await executeCodexReviewToolCall(state, {
           tool: toolCall.tool,
           arguments: toolCall.arguments
+        }, {
+          imageEditRunner: options.imageEditRunner
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

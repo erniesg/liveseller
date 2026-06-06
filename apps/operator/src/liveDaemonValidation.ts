@@ -4,6 +4,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync, appendFileSync } f
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnvFile, runOneImageLivePrep } from "../../prep/src/liveOpenAiPrep";
 import { spawnCodexAppServerStdioTransport } from "./codexAppServerTransport";
 import { runCodexAppServerReviewSession } from "./codexAppServerReview";
 
@@ -11,9 +12,11 @@ const timeoutMs = Number(process.env.LIVESELLER_LIVE_DAEMON_TIMEOUT_MS ?? 180_00
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const traceDir = join(repoRoot, ".liveseller");
 const tracePath = join(traceDir, "live-daemon-validation.jsonl");
+const imageArtifactRoot = join(repoRoot, "artifacts", "prep-live", `live-daemon-${new Date().toISOString().replaceAll(/[:.]/gu, "-")}`);
 const runStartedAt = new Date().toISOString();
 const runStartTime = performance.now();
 
+loadEnvFile(repoRoot);
 mkdirSync(traceDir, { recursive: true });
 writeFileSync(tracePath, "");
 console.log(`LiveSeller live daemon trace: ${tracePath}`);
@@ -86,6 +89,11 @@ function buildSingleProductDropFolder(): string {
 
 const singleProduct = vintageJewelryProducts[0]!;
 const dropFolder = await timed("prepare_single_product_drop_folder", () => buildSingleProductDropFolder());
+const sourceImageFileName = requireFirst(
+  dropFolderFileNameFromProductImage(requireFirst(singleProduct.media.images[0], "single product source image")),
+  "single product drop-folder file name"
+);
+const sourceImagePath = join(dropFolder, sourceImageFileName);
 const prep = await timed("ingest_seller_material", () =>
   buildSellerMaterialIngestion(dropFolder, {
     products: [singleProduct],
@@ -105,6 +113,7 @@ const sellerText = [
   "You must call LiveSeller dynamic tools, not just describe the plan.",
   "First call liveseller_record_seller_review_response with an edit_request response for the first review round.",
   "Then call liveseller_apply_ai_draft_update to shorten the product title and replace photoEnhancementPrompts with one new image-edit prompt.",
+  "Then call liveseller_generate_image_edits to run the server-side image edit worker for the pending image task.",
   "Do not call liveseller_build_create_product_commands because the seller has not approved publishing.",
   "",
   `Use responseId=live-daemon-response-001, roundId=${round.roundId}, productId=${item.productId}.`,
@@ -145,6 +154,46 @@ try {
           cwd: repoRoot,
           reviewPlan: prep.productReviewPlan,
           sellerText,
+          imageEditRunner: async ({ reviewPlan }) => {
+            const apiKey = process.env.OPENAI_API_KEY;
+            if (!apiKey) {
+              throw new Error("OPENAI_API_KEY is required for live daemon image edit validation");
+            }
+            const reviewItem = requireFirst(reviewPlan.items[0], "image edit review item");
+            const prompt = requireFirst(
+              reviewItem.photoEnhancementPlan.prompts[0],
+              "image edit prompt"
+            );
+            const livePrep = await timed("openai_image_edit_generation", () =>
+              runOneImageLivePrep({
+                apiKey,
+                sourceImagePath,
+                outputDir: imageArtifactRoot,
+                products: [singleProduct],
+                liveSessionSpec: {
+                  ...vintageJewelryLiveSessionSpec,
+                  sessionId: "live-daemon-single-product-001",
+                  products: [singleProduct]
+                },
+                imagePrompt: prompt
+              })
+            );
+            trace({
+              type: "image_edit_artifacts",
+              outputDir: imageArtifactRoot,
+              timingPath: livePrep.timingPath,
+              generatedImagePaths: livePrep.generatedImagePaths
+            });
+            return {
+              completedAt: new Date().toISOString(),
+              taskOutputs: livePrep.updatedReviewPlan.generationTasks
+                .filter((task) => task.taskType === "image_edit" && task.status === "completed")
+                .map((task) => ({
+                  taskId: task.taskId,
+                  outputRefs: task.outputRefs
+                }))
+            };
+          },
           onTrace: (event) => trace({ type: "jsonrpc", ...event })
         },
         transport
@@ -176,11 +225,20 @@ try {
   if (!toolNames.includes("liveseller_apply_ai_draft_update")) {
     throw new Error("Live daemon did not call liveseller_apply_ai_draft_update");
   }
+  if (!toolNames.includes("liveseller_generate_image_edits")) {
+    throw new Error("Live daemon did not call liveseller_generate_image_edits");
+  }
   if (!updatedItem.product.title.includes("Live Review Draft")) {
     throw new Error("Live daemon did not apply the requested title edit");
   }
   if (updatedItem.photoEnhancementPlan.prompts.length !== 1) {
     throw new Error("Live daemon did not replace photo enhancement prompts");
+  }
+  const completedImageTasks = result.reviewPlan.generationTasks.filter((task) =>
+    task.productId === updatedItem.productId && task.taskType === "image_edit" && task.status === "completed"
+  );
+  if (completedImageTasks.length === 0 || completedImageTasks.some((task) => task.outputRefs.length === 0)) {
+    throw new Error("Live daemon did not attach generated image-edit outputs");
   }
   if (result.createProductCommands.length !== 0) {
     throw new Error("Live daemon built publish commands before seller approval");
@@ -195,6 +253,7 @@ try {
     updatedProductId: updatedItem.productId,
     updatedTitle: updatedItem.product.title,
     imagePromptCount: updatedItem.photoEnhancementPlan.prompts.length,
+    imageEditOutputRefs: completedImageTasks.flatMap((task) => task.outputRefs),
     createProductCommandCount: result.createProductCommands.length,
     timings: {
       startedAt: runStartedAt,
