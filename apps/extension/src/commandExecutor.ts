@@ -199,7 +199,9 @@ export function executeQueuedShopeeCreateProductCommand(
       "[name='product_name']",
       "[name='name']",
       "input[placeholder*='Product Name' i]",
-      "input[placeholder*='product name' i]"
+      "input[placeholder*='product name' i]",
+      "input[placeholder*='Brand Name' i]",
+      "input[placeholder*='Product Type' i]"
     ], product.title, "title"),
     writeField(root, [
       "textarea[name='description']",

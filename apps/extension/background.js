@@ -92,7 +92,14 @@ function fillShopeeCreateProductForm(command) {
     return { ok: false, error: "missing_product_payload" };
   }
   const filled = [
-    write(["[name='product_name']", "[name='name']", "input[placeholder*='Product Name' i]", "input[placeholder*='product name' i]"], product.title),
+    write([
+      "[name='product_name']",
+      "[name='name']",
+      "input[placeholder*='Product Name' i]",
+      "input[placeholder*='product name' i]",
+      "input[placeholder*='Brand Name' i]",
+      "input[placeholder*='Product Type' i]"
+    ], product.title),
     write(["textarea[name='description']", "[name='description']", "textarea[placeholder*='description' i]"], product.description),
     write(["[name='price']", "input[placeholder*='price' i]"], product.price),
     write(["[name='stock']", "input[placeholder*='stock' i]"], product.stock),

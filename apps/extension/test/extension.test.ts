@@ -86,7 +86,7 @@ describe("Shopee extension command safety", () => {
 
   it("fills authenticated Shopee product form fields from approved create-product commands", () => {
     document.body.innerHTML = `
-      <input name="product_name" />
+      <input placeholder="Brand Name + Product Type + Key Features (Materials, Colors, Size, Model)" />
       <textarea name="description"></textarea>
       <input name="price" />
       <input name="stock" />
@@ -97,7 +97,7 @@ describe("Shopee extension command safety", () => {
     const result = executeQueuedShopeeCreateProductCommand(validShopeeCreateProductCommand, document);
 
     expect(result.toolResult.status).toBe("applied");
-    expect((document.querySelector("input[name='product_name']") as HTMLInputElement).value)
+    expect((document.querySelector("input[placeholder*='Brand Name']") as HTMLInputElement).value)
       .toBe(validShopeeCreateProductCommand.payload.product.title);
     expect((document.querySelector("textarea[name='description']") as HTMLTextAreaElement).value)
       .toBe(validShopeeCreateProductCommand.payload.product.description);
