@@ -133,7 +133,8 @@ body {
   grid-template-columns: repeat(2, minmax(118px, auto)) auto auto;
   gap: 8px;
   align-items: center;
-  max-width: min(100%, 560px);
+  width: min(100%, 660px);
+  max-width: 660px;
   padding: 10px;
   border: 1px solid rgba(248, 250, 252, 0.22);
   border-radius: 8px;
@@ -157,6 +158,26 @@ body {
   grid-column: 1 / span 3;
   min-width: 0;
   padding: 0 10px;
+}
+
+.host-log {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+  max-height: 92px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  color: #cbd5e1;
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.host-log li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .host-controls button {

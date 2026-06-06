@@ -13,6 +13,7 @@ import { translateCaptionForRuntime } from "./translation";
 
 const auditLog: unknown[] = [];
 let overlayState = createInitialOverlayState(validLiveSessionSpec);
+let captionEpoch = 0;
 
 const runtimeHeaders = {
   "access-control-allow-headers": "content-type",
@@ -85,6 +86,10 @@ function sessionForHostTranslation(
   };
 }
 
+function logRuntime(event: string, details: Record<string, unknown>) {
+  console.log(`[runtime:${event}] ${JSON.stringify(details)}`);
+}
+
 export function createRuntimeServer() {
   return createServer(async (req, res) => {
     try {
@@ -109,6 +114,7 @@ export function createRuntimeServer() {
       }
 
       if (req.method === "POST" && req.url === "/api/runtime/captions/clear") {
+        captionEpoch += 1;
         overlayState = {
           ...overlayState,
           caption: {
@@ -119,6 +125,10 @@ export function createRuntimeServer() {
           translatedCaptions: [],
           updatedAt: new Date().toISOString()
         };
+        logRuntime("captions.clear", {
+          captionEpoch,
+          sessionId: overlayState.sessionId
+        });
         sendJson(res, 200, overlayState);
         return;
       }
@@ -137,6 +147,14 @@ export function createRuntimeServer() {
         );
         const sourceLanguage = event.payload.language;
         const session = sessionForHostTranslation(sourceLanguage, targetLanguage);
+        const requestEpoch = captionEpoch;
+        logRuntime("hostTranscript.received", {
+          eventId: event.eventId,
+          requestEpoch,
+          sourceLanguage,
+          targetLanguage,
+          textLength: event.payload.text.length
+        });
         const routed = await routeRuntimeEventAsync(event, session, {
           previousOverlayState: overlayState,
           translateCaptionText: async ({ text, sourceLanguage, targetLanguage }) => {
@@ -154,8 +172,27 @@ export function createRuntimeServer() {
             return result.text;
           }
         });
+        if (requestEpoch !== captionEpoch) {
+          logRuntime("hostTranscript.stale", {
+            eventId: event.eventId,
+            requestEpoch,
+            captionEpoch
+          });
+          sendJson(res, 200, {
+            ...routed,
+            overlayState,
+            stale: true
+          });
+          return;
+        }
         overlayState = routed.overlayState;
         auditLog.push(...routed.auditEvents);
+        logRuntime("hostTranscript.applied", {
+          eventId: event.eventId,
+          requestEpoch,
+          captionEpoch,
+          actions: routed.actions.map((action) => action.type)
+        });
         sendJson(res, 200, routed);
         return;
       }

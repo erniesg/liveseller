@@ -17,6 +17,7 @@ type SpeechRecognitionResultLike = {
 };
 
 type SpeechRecognitionEventLike = {
+  readonly resultIndex: number;
   readonly results: {
     readonly length: number;
     readonly [index: number]: SpeechRecognitionResultLike;
@@ -94,17 +95,28 @@ async function clearRuntimeCaptions(runtimeBaseUrl: string): Promise<OverlayStat
 
 function HostLiveControls({
   runtimeBaseUrl,
-  onState
+  onState,
+  onActiveChange
 }: {
   runtimeBaseUrl: string;
   onState: Dispatch<SetStateAction<OverlayState>>;
+  onActiveChange: (active: boolean) => void;
 }) {
   const [sourceLanguage, setSourceLanguage] = useState<LanguageCode>("en");
   const [targetLanguage, setTargetLanguage] = useState<LanguageCode>("ms");
   const [isListening, setIsListening] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [manualText, setManualText] = useState("");
+  const [logs, setLogs] = useState<string[]>([]);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const requestSeqRef = useRef(0);
+  const activeSeqRef = useRef(0);
+
+  function logHost(event: string, details: Record<string, unknown> = {}) {
+    const message = `${new Date().toLocaleTimeString()} ${event} ${JSON.stringify(details)}`;
+    console.log(`[overlay:${event}]`, details);
+    setLogs((previous) => [message, ...previous].slice(0, 6));
+  }
 
   function clearLocalCaptions() {
     onState((previous) => ({
@@ -121,10 +133,13 @@ function HostLiveControls({
   }
 
   async function clearCaptions() {
+    requestSeqRef.current += 1;
     clearLocalCaptions();
     try {
       onState(await clearRuntimeCaptions(runtimeBaseUrl));
+      logHost("captions.clear");
     } catch {
+      logHost("captions.clear_failed");
       setStatus("Ready");
     }
   }
@@ -134,6 +149,9 @@ function HostLiveControls({
       return;
     }
     const transcript = text.trim();
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
+    const startedAt = performance.now();
     onState((previous) => ({
       ...previous,
       caption: {
@@ -145,14 +163,32 @@ function HostLiveControls({
       updatedAt: new Date().toISOString()
     }));
     setStatus("Translating");
+    logHost("transcript.request", {
+      requestSeq,
+      sourceLanguage,
+      targetLanguage,
+      textLength: transcript.length
+    });
     const nextState = await postHostTranscript(
       runtimeBaseUrl,
       transcript,
       sourceLanguage,
       targetLanguage
     );
+    if (requestSeq !== requestSeqRef.current) {
+      logHost("transcript.stale_ignored", {
+        requestSeq,
+        activeRequestSeq: requestSeqRef.current
+      });
+      return;
+    }
     onState(nextState);
     setStatus("Live");
+    logHost("transcript.response", {
+      requestSeq,
+      ms: Math.round(performance.now() - startedAt),
+      translations: nextState.translatedCaptions.map((caption) => caption.language)
+    });
   }
 
   useEffect(() => {
@@ -165,6 +201,7 @@ function HostLiveControls({
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setIsListening(false);
+    onActiveChange(false);
     setManualText("");
     void clearCaptions();
   }, [sourceLanguage, targetLanguage]);
@@ -178,31 +215,74 @@ function HostLiveControls({
 
     const recognition = new Recognition();
     recognition.continuous = true;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.lang =
       languageOptions.find((language) => language.code === sourceLanguage)?.speechCode ?? "en-SG";
     recognition.onresult = (event) => {
-      const result = event.results[event.results.length - 1];
-      const transcript = result?.[0]?.transcript;
-      if (result?.isFinal && transcript) {
-        void sendTranscript(transcript).catch(() => setStatus("Runtime error"));
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        if (!result) {
+          continue;
+        }
+        const transcript = result[0]?.transcript.trim();
+        if (!transcript) {
+          continue;
+        }
+        if (result.isFinal) {
+          logHost("speech.final", { textLength: transcript.length });
+          void sendTranscript(transcript).catch(() => setStatus("Runtime error"));
+        } else {
+          onState((previous) => ({
+            ...previous,
+            caption: {
+              text: transcript,
+              language: sourceLanguage,
+              visible: true
+            },
+            translatedCaptions: [],
+            updatedAt: new Date().toISOString()
+          }));
+          logHost("speech.interim", { textLength: transcript.length });
+        }
       }
     };
-    recognition.onerror = () => setStatus("Mic error");
-    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => {
+      logHost("speech.error");
+      setStatus("Mic error");
+    };
+    const sessionSeq = activeSeqRef.current + 1;
+    activeSeqRef.current = sessionSeq;
+    recognition.onend = () => {
+      if (activeSeqRef.current === sessionSeq) {
+        setIsListening(false);
+        onActiveChange(false);
+        logHost("speech.end", { sessionSeq });
+      }
+    };
     void clearCaptions();
     recognition.start();
     recognitionRef.current = recognition;
     setIsListening(true);
+    onActiveChange(true);
     setStatus("Listening");
+    logHost("speech.start", {
+      sourceLanguage,
+      targetLanguage,
+      speechCode: recognition.lang,
+      sessionSeq
+    });
   }
 
   function stopListening() {
+    activeSeqRef.current += 1;
+    requestSeqRef.current += 1;
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setIsListening(false);
+    onActiveChange(false);
     void clearCaptions();
     setStatus("Ready");
+    logHost("speech.stop");
   }
 
   function submitManualTranscript() {
@@ -248,6 +328,11 @@ function HostLiveControls({
       <button type="button" onClick={submitManualTranscript}>
         Send
       </button>
+      <ol className="host-log" aria-label="Host translator logs">
+        {logs.map((log, index) => (
+          <li key={`${index}-${log}`}>{log}</li>
+        ))}
+      </ol>
     </aside>
   );
 }
@@ -259,6 +344,7 @@ export function App({
   runtimeBaseUrl = "http://127.0.0.1:8787"
 }: AppProps) {
   const [liveState, setLiveState] = useState<OverlayState>(state ?? validOverlayState);
+  const [liveControlsActive, setLiveControlsActive] = useState(false);
   const displayState = state ?? liveState;
   const backingLabel =
     displayState.promoBanner?.backing === "shopee" ? "Shopee-backed" : "Overlay-only";
@@ -270,6 +356,9 @@ export function App({
 
     let cancelled = false;
     const loadState = async () => {
+      if (liveControlsActive) {
+        return;
+      }
       const response = await fetch(`${runtimeBaseUrl}/api/runtime/overlay-state`);
       if (!response.ok || cancelled) {
         return;
@@ -282,7 +371,7 @@ export function App({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [runtimeBaseUrl, state]);
+  }, [liveControlsActive, runtimeBaseUrl, state]);
 
   return (
     <main className="overlay-shell" aria-label="LiveSeller livestream overlay">
@@ -313,7 +402,11 @@ export function App({
       </section>
 
       {enableLiveControls ? (
-        <HostLiveControls runtimeBaseUrl={runtimeBaseUrl} onState={setLiveState} />
+        <HostLiveControls
+          runtimeBaseUrl={runtimeBaseUrl}
+          onActiveChange={setLiveControlsActive}
+          onState={setLiveState}
+        />
       ) : null}
 
       <section className="caption-band" aria-label="Live captions">
