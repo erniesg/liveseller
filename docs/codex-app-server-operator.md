@@ -12,7 +12,10 @@ LiveSeller uses Codex app-server as the intended operator-console runtime for mu
   - `liveseller_build_create_product_commands`
 - `buildCodexAppServerReviewTurn` builds the JSON-RPC app-server messages for a seller review turn: `initialize`, `initialized`, `thread/start`, and `turn/start`.
 - `executeCodexReviewToolCall` handles Codex-selected tool calls with deterministic LiveSeller domain functions. It can update review rounds, apply AI draft patches, attach generation outputs, record approval/rejection/edit decisions, and build create-product commands only after approval.
-- `npm run demo:operator` shows the app-server message shape and deterministic tool execution without starting a live Codex model turn.
+- `runCodexAppServerReviewSession` runs the operator event loop over a `CodexAppServerTransport`, sends the app-server startup messages, handles `item/tool/call`, returns `item/tool/result`, and records UI-renderable operator events.
+- `apps/operator/src/generated/app-server` contains experimental TypeScript bindings generated with `codex app-server generate-ts --experimental`.
+- `apps/extension` can render Codex operator session events in the side panel without storing OpenAI keys in browser code.
+- `npm run demo:operator` shows the app-server message shape, a simulated JSON-RPC tool-call round, and the resulting operator event stream without starting a live Codex model turn.
 
 ## Why Not Just A Prompt
 
@@ -21,9 +24,8 @@ LiveSeller uses Codex app-server as the intended operator-console runtime for mu
 - A prompt-only flow has no native approval/event stream. App-server exposes approval and tool-call events that an operator console can render and resolve.
 - A prompt-only flow can accidentally blur policy and execution. The app-server tool boundary keeps publish commands deterministic and approval-gated.
 
-## Remaining Live Transport Work
+## Remaining Live Daemon Work
 
-- Connect `apps/operator` to a live `codex app-server` process over `stdio://`, `unix://`, or `ws://127.0.0.1:<port>`.
-- Listen for `item/tool/call` requests, run `executeCodexReviewToolCall`, and return the tool result content items.
+- Implement the concrete `CodexAppServerTransport` adapter that spawns or connects to `codex app-server --listen stdio://`, `unix://`, or `ws://127.0.0.1:<port>`.
 - Render approval prompts and request-user-input events in the operator UI.
 - Feed generated review plan artifacts and product image variants back into the seller review screen.

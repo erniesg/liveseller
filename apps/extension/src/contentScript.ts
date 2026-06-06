@@ -82,6 +82,17 @@ export type SellerUiPolicyPayload = {
   };
 };
 
+export type CodexOperatorEventPayload = {
+  threadId: string;
+  events: Array<{
+    type: "session_started" | "tool_call_received" | "tool_result_sent" | "turn_completed";
+    message: string;
+    timestamp: string;
+    tool?: string;
+    callId?: string;
+  }>;
+};
+
 export type HandledReceiveNormalUserMessage = {
   event: RuntimeEvent;
   runtimeResponse: RuntimeActionResponse;
@@ -351,6 +362,43 @@ export function renderSellerUiPolicy(target: Element, policy: SellerUiPolicyPayl
       photo.textContent = `${photoPlan.model}: ${photoPlan.promptCount} prompts from ${photoPlan.sourceImageCount} source images`;
       article.append(photo);
     }
+
+    section.append(article);
+  }
+
+  target.replaceChildren(section);
+}
+
+export function renderCodexOperatorEvents(target: Element, payload: CodexOperatorEventPayload): void {
+  const doc = target.ownerDocument;
+  const section = doc.createElement("section");
+  section.setAttribute("data-liveseller-codex-operator", payload.threadId);
+
+  const heading = doc.createElement("h2");
+  heading.textContent = "Codex app-server";
+  section.append(heading);
+
+  const meta = doc.createElement("p");
+  meta.textContent = payload.threadId;
+  section.append(meta);
+
+  for (const event of payload.events) {
+    const article = doc.createElement("article");
+    article.setAttribute("data-liveseller-codex-event", event.type);
+
+    const title = doc.createElement("h3");
+    title.textContent = event.tool ? `${event.type} - ${event.tool}` : event.type;
+    article.append(title);
+
+    const message = doc.createElement("p");
+    message.textContent = event.message;
+    article.append(message);
+
+    const timestamp = doc.createElement("p");
+    timestamp.textContent = event.callId
+      ? `${event.timestamp} - ${event.callId}`
+      : event.timestamp;
+    article.append(timestamp);
 
     section.append(article);
   }

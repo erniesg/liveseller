@@ -6,7 +6,8 @@ import {
 import {
   LIVESELLER_CODEX_REVIEW_TOOLS,
   buildCodexAppServerReviewTurn,
-  executeCodexReviewToolCall
+  executeCodexReviewToolCall,
+  runCodexAppServerReviewSession
 } from "../src/codexAppServerReview";
 
 describe("Codex app-server operator review loop", () => {
@@ -109,5 +110,72 @@ describe("Codex app-server operator review loop", () => {
       approvalDecisionId: approvedDecision.decisionId,
       approvalStatus: "approved"
     });
+  });
+
+  it("runs a JSON-RPC app-server session and answers Codex tool-call events", async () => {
+    const sent: unknown[] = [];
+    const events = [
+      {
+        method: "item/tool/call",
+        params: {
+          callId: "call-record-response-001",
+          tool: "liveseller_record_seller_review_response",
+          arguments: {
+            response: {
+              ...validSellerFreeFormReviewResponse,
+              text: "Shorter title please.",
+              interpretedIntent: "edit_request"
+            }
+          }
+        }
+      },
+      {
+        method: "turn/completed",
+        params: {
+          reason: "tool_result_applied"
+        }
+      }
+    ];
+
+    const result = await runCodexAppServerReviewSession(
+      {
+        cwd: "/repo/liveseller",
+        threadId: "thread-review-001",
+        reviewPlan: validProductReviewPlan,
+        sellerText: "Shorter title please."
+      },
+      {
+        send: async (message) => {
+          sent.push(message);
+        },
+        events: async function* () {
+          for (const event of events) {
+            yield event;
+          }
+        }
+      }
+    );
+
+    expect(sent).toEqual([
+      expect.objectContaining({ method: "initialize" }),
+      expect.objectContaining({ method: "initialized" }),
+      expect.objectContaining({ method: "thread/start" }),
+      expect.objectContaining({ method: "turn/start" }),
+      expect.objectContaining({
+        method: "item/tool/result",
+        params: expect.objectContaining({
+          callId: "call-record-response-001",
+          content: expect.arrayContaining([expect.objectContaining({ type: "text" })])
+        })
+      })
+    ]);
+    expect(result.reviewPlan.items[0]?.reviewRounds).toHaveLength(2);
+    expect(result.createProductCommands).toEqual([]);
+    expect(result.operatorEvents.map((event) => event.type)).toEqual([
+      "session_started",
+      "tool_call_received",
+      "tool_result_sent",
+      "turn_completed"
+    ]);
   });
 });

@@ -1,4 +1,7 @@
 import { z } from "zod";
+import type { ServerNotification } from "./generated/app-server/ServerNotification";
+import type { ServerRequest } from "./generated/app-server/ServerRequest";
+import type { DynamicToolCallParams } from "./generated/app-server/v2/DynamicToolCallParams";
 import {
   type AiDraftUpdate,
   type ProductReviewDecision,
@@ -126,6 +129,8 @@ export type CodexJsonRpcRequest = {
   params?: Record<string, unknown>;
 };
 
+export type CodexJsonRpcMessage = CodexJsonRpcRequest | ServerRequest | ServerNotification;
+
 export type CodexReviewTurnOptions = {
   cwd: string;
   threadId: string;
@@ -162,6 +167,23 @@ export type CodexReviewToolState = {
 
 export type CodexReviewToolResult = CodexReviewToolState & {
   contentItems: Array<{ type: "text"; text: string }>;
+};
+
+export type CodexOperatorEvent = {
+  type: "session_started" | "tool_call_received" | "tool_result_sent" | "turn_completed";
+  message: string;
+  timestamp: string;
+  tool?: CodexReviewToolName;
+  callId?: string;
+};
+
+export type CodexAppServerTransport = {
+  send(message: CodexJsonRpcRequest): Promise<void>;
+  events(): AsyncIterable<CodexJsonRpcMessage>;
+};
+
+export type CodexReviewSessionResult = CodexReviewToolState & {
+  operatorEvents: CodexOperatorEvent[];
 };
 
 const SellerResponseArgsSchema = z.object({
@@ -214,6 +236,59 @@ function content(action: string, state: CodexReviewToolState): CodexReviewToolRe
       ].join("; ")
     }
   ];
+}
+
+function now(): string {
+  return new Date().toISOString();
+}
+
+function operatorEvent(
+  event: Omit<CodexOperatorEvent, "timestamp">
+): CodexOperatorEvent {
+  return {
+    ...event,
+    timestamp: now()
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function isReviewToolName(value: unknown): value is CodexReviewToolName {
+  return typeof value === "string" && LIVESELLER_CODEX_REVIEW_TOOLS.some((tool) => tool.name === value);
+}
+
+function readToolCall(message: CodexJsonRpcMessage): (DynamicToolCallParams & {
+  id?: number;
+  tool: CodexReviewToolName;
+}) | undefined {
+  const record = asRecord(message);
+  if (record?.method !== "item/tool/call") {
+    return undefined;
+  }
+
+  const id = typeof record.id === "number" ? record.id : undefined;
+  const params = asRecord(record.params);
+  if (!params || !isReviewToolName(params.tool)) {
+    return undefined;
+  }
+
+  return {
+    threadId: typeof params.threadId === "string" ? params.threadId : "",
+    turnId: typeof params.turnId === "string" ? params.turnId : "",
+    callId: typeof params.callId === "string" ? params.callId : `call-${id ?? "unknown"}`,
+    namespace: typeof params.namespace === "string" ? params.namespace : null,
+    tool: params.tool,
+    arguments: params.arguments ?? {},
+    id
+  };
+}
+
+function isTurnCompleted(message: CodexJsonRpcMessage): boolean {
+  return asRecord(message)?.method === "turn/completed";
 }
 
 export function buildCodexAppServerReviewTurn(options: CodexReviewTurnOptions): CodexReviewTurnMessages {
@@ -324,4 +399,81 @@ export async function executeCodexReviewToolCall(
   }
 
   throw new Error(`Unsupported Codex review tool: ${call.tool satisfies never}`);
+}
+
+export async function runCodexAppServerReviewSession(
+  options: CodexReviewTurnOptions,
+  transport: CodexAppServerTransport
+): Promise<CodexReviewSessionResult> {
+  const turn = buildCodexAppServerReviewTurn(options);
+  const operatorEvents: CodexOperatorEvent[] = [];
+  let state: CodexReviewToolState = {
+    reviewPlan: ProductReviewPlanSchema.parse(options.reviewPlan),
+    createProductCommands: []
+  };
+
+  for (const message of [turn.initialize, turn.initialized, turn.threadStart, turn.turnStart]) {
+    await transport.send(message);
+  }
+
+  operatorEvents.push(operatorEvent({
+    type: "session_started",
+    message: "Codex app-server review session started."
+  }));
+
+  for await (const message of transport.events()) {
+    const toolCall = readToolCall(message);
+    if (toolCall) {
+      operatorEvents.push(operatorEvent({
+        type: "tool_call_received",
+        message: `Codex requested ${toolCall.tool}.`,
+        tool: toolCall.tool,
+        callId: toolCall.callId
+      }));
+
+      const result = await executeCodexReviewToolCall(state, {
+        tool: toolCall.tool,
+        arguments: toolCall.arguments
+      });
+      state = {
+        reviewPlan: result.reviewPlan,
+        createProductCommands: result.createProductCommands
+      };
+
+      await transport.send({
+        id: toolCall.id,
+        method: "item/tool/result",
+        params: {
+          callId: toolCall.callId,
+          content: result.contentItems,
+          contentItems: result.contentItems.map((item) => ({
+            type: "inputText",
+            text: item.text
+          })),
+          success: true
+        }
+      });
+
+      operatorEvents.push(operatorEvent({
+        type: "tool_result_sent",
+        message: `LiveSeller returned a validated result for ${toolCall.tool}.`,
+        tool: toolCall.tool,
+        callId: toolCall.callId
+      }));
+      continue;
+    }
+
+    if (isTurnCompleted(message)) {
+      operatorEvents.push(operatorEvent({
+        type: "turn_completed",
+        message: "Codex app-server review turn completed."
+      }));
+      break;
+    }
+  }
+
+  return {
+    ...state,
+    operatorEvents
+  };
 }

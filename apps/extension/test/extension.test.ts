@@ -16,6 +16,7 @@ import {
   extractViewerMessage,
   handleReceiveNormalUserMessage,
   installReceiveNormalUserMessageHook,
+  renderCodexOperatorEvents,
   renderSellerUiPolicy,
   toViewerChatEvent
 } from "../src/contentScript";
@@ -222,6 +223,41 @@ describe("Shopee extension command safety", () => {
     expect(document.querySelector("[data-liveseller-policy-status]")?.textContent).toContain(
       "seller_review_required"
     );
+  });
+
+  it("renders Codex operator app-server events without model secrets", () => {
+    document.body.innerHTML = '<section id="operator"></section>';
+
+    renderCodexOperatorEvents(document.getElementById("operator")!, {
+      threadId: "thread-review-001",
+      events: [
+        {
+          type: "session_started",
+          message: "Codex app-server review session started.",
+          timestamp: "2026-06-06T04:30:00.000Z"
+        },
+        {
+          type: "tool_call_received",
+          message: "Codex requested liveseller_record_seller_review_response.",
+          timestamp: "2026-06-06T04:30:01.000Z",
+          tool: "liveseller_record_seller_review_response",
+          callId: "call-record-response-001"
+        },
+        {
+          type: "tool_result_sent",
+          message: "LiveSeller returned a validated review-plan update.",
+          timestamp: "2026-06-06T04:30:02.000Z",
+          tool: "liveseller_record_seller_review_response",
+          callId: "call-record-response-001"
+        }
+      ]
+    });
+
+    const operator = document.querySelector("[data-liveseller-codex-operator='thread-review-001']");
+    expect(operator?.textContent).toContain("Codex app-server");
+    expect(operator?.textContent).toContain("liveseller_record_seller_review_response");
+    expect(operator?.textContent).not.toMatch(/OPENAI|sk-/i);
+    expect(document.querySelectorAll("[data-liveseller-codex-event]")).toHaveLength(3);
   });
 
   it("keeps OpenAI keys out of extension manifest", () => {
