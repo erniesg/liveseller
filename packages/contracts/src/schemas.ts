@@ -599,6 +599,31 @@ export const ShopeeCreateProductCommandSchema = z
   });
 export type ShopeeCreateProductCommand = z.infer<typeof ShopeeCreateProductCommandSchema>;
 
+export const ShopeeStartLivestreamCommandSchema = z
+  .object({
+    commandId: z.string().min(1),
+    sessionId: z.string().min(1),
+    kind: z.literal("prepare_livestream"),
+    createdAt: z.string().datetime(),
+    approvalId: z.string().min(1),
+    approvalStatus: z.literal("approved"),
+    safetyMode: z.literal("dry_run"),
+    payload: z
+      .object({
+        title: z.string().min(1),
+        productIds: z.array(z.string().min(1)).min(1),
+        publicOverlayUrl: z.string().min(1),
+        streamCredentialHandling: z.literal("manual_or_server_env_only"),
+        rtmpEvidence: z.literal("redacted"),
+        cameraPreviewRequired: z.boolean(),
+        goLive: z.literal(false)
+      })
+      .strict(),
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict();
+export type ShopeeStartLivestreamCommand = z.infer<typeof ShopeeStartLivestreamCommandSchema>;
+
 export const LiveSessionSpecSchema = z
   .object({
     sessionId: z.string().min(1),

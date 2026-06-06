@@ -15,6 +15,7 @@ import {
   SellerFreeFormReviewResponseSchema,
   SessionMemorySchema,
   ShopeeCreateProductCommandSchema,
+  ShopeeStartLivestreamCommandSchema,
   ViewerMemorySchema,
   badFixtures,
   validAiDraftUpdate,
@@ -28,6 +29,7 @@ import {
   validRuntimeEvents,
   validSellerFreeFormReviewResponse,
   validShopeeCreateProductCommand,
+  validShopeeStartLivestreamCommand,
   validSessionMemory,
   validViewerMemory,
   vintageJewelryLiveSessionSpec,
@@ -54,6 +56,7 @@ describe("contract freeze", () => {
       validProductReviewPlan.generationTasks.forEach((task) => PrepGenerationTaskSchema.parse(task));
     }).not.toThrow();
     expect(() => ShopeeCreateProductCommandSchema.parse(validShopeeCreateProductCommand)).not.toThrow();
+    expect(() => ShopeeStartLivestreamCommandSchema.parse(validShopeeStartLivestreamCommand)).not.toThrow();
   });
 
   it("rejects invalid or private contract payloads", () => {
@@ -97,6 +100,25 @@ describe("contract freeze", () => {
     });
     expect(validShopeeCreateProductCommand.payload.product.price).toBe(validProducts[0]!.price);
     expect(validShopeeCreateProductCommand.payload.product.stock).toBe(validProducts[0]!.stock);
+  });
+
+  it("keeps livestream setup commands free of RTMP secrets", () => {
+    expect(validShopeeStartLivestreamCommand).toMatchObject({
+      kind: "prepare_livestream",
+      approvalStatus: "approved",
+      safetyMode: "dry_run"
+    });
+    expect(JSON.stringify(validShopeeStartLivestreamCommand).toLowerCase()).not.toContain("streamkey");
+    expect(JSON.stringify(validShopeeStartLivestreamCommand).toLowerCase()).not.toContain("rtmp://");
+    expect(() =>
+      ShopeeStartLivestreamCommandSchema.parse({
+        ...validShopeeStartLivestreamCommand,
+        payload: {
+          ...validShopeeStartLivestreamCommand.payload,
+          streamKey: "raw-secret-key"
+        }
+      })
+    ).toThrow();
   });
 
   it("validates a context envelope assembled by another lane", () => {

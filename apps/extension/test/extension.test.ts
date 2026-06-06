@@ -7,11 +7,13 @@ import {
   validLiveAction,
   validLiveSessionSpec,
   validProductReviewPlan,
-  validShopeeCreateProductCommand
+  validShopeeCreateProductCommand,
+  validShopeeStartLivestreamCommand
 } from "@liveseller/contracts";
 import {
   executeSellerCommand,
-  executeShopeeCreateProductCommand
+  executeShopeeCreateProductCommand,
+  executeShopeeStartLivestreamCommand
 } from "../src/commandExecutor";
 import {
   buildProductReviewDecision,
@@ -78,6 +80,26 @@ describe("Shopee extension command safety", () => {
 
     expect(pending.toolResult.status).toBe("rejected");
     expect(pending.command).toBeUndefined();
+  });
+
+  it("dry-runs livestream setup without exposing RTMP secrets or pressing go live", () => {
+    const dryRun = executeShopeeStartLivestreamCommand(validShopeeStartLivestreamCommand);
+
+    expect(dryRun.toolResult.status).toBe("applied");
+    expect(dryRun.command?.safetyMode).toBe("dry_run");
+    expect(dryRun.command?.payload.goLive).toBe(false);
+    expect(JSON.stringify(dryRun).toLowerCase()).not.toContain("streamkey");
+    expect(JSON.stringify(dryRun).toLowerCase()).not.toContain("rtmp://");
+
+    const withSecret = executeShopeeStartLivestreamCommand({
+      ...validShopeeStartLivestreamCommand,
+      payload: {
+        ...validShopeeStartLivestreamCommand.payload,
+        streamKey: "raw-secret-key"
+      }
+    });
+    expect(withSecret.toolResult.status).toBe("rejected");
+    expect(withSecret.command).toBeUndefined();
   });
 
   it("captures viewer messages from audited DOM rows", () => {

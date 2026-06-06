@@ -141,6 +141,27 @@ export function SellerConsole({
     );
   }
 
+  async function startShow() {
+    await sendEvent(
+      {
+        eventId: eventId("seller-show-start"),
+        sessionId,
+        timestamp: new Date().toISOString(),
+        source: "seller",
+        type: "stream_lifecycle",
+        payload: {
+          status: "started",
+          reason: "Seller started the private run-of-show preview. RTMP credentials stay manual or server-side."
+        }
+      },
+      "Show started"
+    );
+
+    for (const product of session.products.slice(0, 3)) {
+      await showProduct(product.id);
+    }
+  }
+
   async function sendHostTranscript() {
     await sendEvent(
       {
@@ -196,7 +217,12 @@ export function SellerConsole({
         <section className="seller-panel product-context-panel" aria-label="Products to show">
           <div className="seller-panel-heading">
             <h2>Product context</h2>
-            <a href={publicOverlayUrl} target="_blank" rel="noreferrer">Open overlay</a>
+            <div className="seller-heading-actions">
+              <button type="button" onClick={() => void startShow()}>
+                Start show
+              </button>
+              <a href={publicOverlayUrl} target="_blank" rel="noreferrer">Open overlay</a>
+            </div>
           </div>
           <div className="seller-product-list">
             {session.products.map((product) => (

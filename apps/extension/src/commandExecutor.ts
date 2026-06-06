@@ -1,8 +1,10 @@
 import {
   type LiveAction,
   type ShopeeCreateProductCommand,
+  type ShopeeStartLivestreamCommand,
   type ToolResult,
   ShopeeCreateProductCommandSchema,
+  ShopeeStartLivestreamCommandSchema,
   ToolResultSchema
 } from "@liveseller/contracts";
 
@@ -20,6 +22,11 @@ export type ExecutedCommand = {
 export type ExecutedProductCommand = {
   toolResult: ToolResult;
   command?: ShopeeCreateProductCommand;
+};
+
+export type ExecutedLivestreamCommand = {
+  toolResult: ToolResult;
+  command?: ShopeeStartLivestreamCommand;
 };
 
 const extensionEvidence = [
@@ -121,6 +128,24 @@ export function executeShopeeCreateProductCommand(input: unknown): ExecutedProdu
         readCommandId(input),
         "rejected",
         "create_product requires approved or edited product review state"
+      )
+    };
+  }
+
+  return {
+    toolResult: result(parsed.data.commandId, "applied"),
+    command: parsed.data
+  };
+}
+
+export function executeShopeeStartLivestreamCommand(input: unknown): ExecutedLivestreamCommand {
+  const parsed = ShopeeStartLivestreamCommandSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      toolResult: result(
+        readCommandId(input),
+        "rejected",
+        "prepare_livestream requires approved dry-run setup with redacted stream credentials"
       )
     };
   }

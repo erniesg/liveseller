@@ -305,6 +305,14 @@ body {
   gap: 12px;
 }
 
+.seller-heading-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .seller-panel h2,
 .seller-product h3,
 .seller-overlay-preview h3 {

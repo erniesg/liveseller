@@ -272,6 +272,30 @@ describe("live brain policy runtime", () => {
     expect(overlay.translatedCaptions.some((caption) => caption.language === "en")).toBe(true);
   });
 
+  it("records livestream start lifecycle without RTMP secrets", () => {
+    const store = createRuntimeSessionStore(validLiveSessionSpec);
+    const result = store.route({
+      eventId: "event-livestream-started",
+      sessionId: validLiveSessionSpec.sessionId,
+      timestamp: "2026-06-06T02:10:00.000Z",
+      source: "extension",
+      type: "stream_lifecycle",
+      payload: {
+        status: "started",
+        reason: "Seller approved dry-run livestream setup; OBS/Shopee credentials remain manual."
+      }
+    });
+
+    expect(result.auditEvents.map((event) => event.kind)).toEqual(expect.arrayContaining(["input", "context"]));
+    expect(store.summary()).toMatchObject({
+      status: "active",
+      eventCount: 1
+    });
+    expect(store.summary().moments.map((moment) => moment.kind)).toContain("lifecycle");
+    expect(JSON.stringify(store.snapshot()).toLowerCase()).not.toContain("streamkey");
+    expect(JSON.stringify(store.snapshot()).toLowerCase()).not.toContain("rtmp://");
+  });
+
   it("serves the current overlay snapshot over HTTP", async () => {
     const server = createRuntimeServer();
     await new Promise<void>((resolve) => server.listen(0, resolve));

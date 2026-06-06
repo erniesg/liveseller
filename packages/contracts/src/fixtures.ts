@@ -18,6 +18,7 @@ import type {
   SellerReviewRound,
   SellerUiPolicy,
   ShopeeCreateProductCommand,
+  ShopeeStartLivestreamCommand,
   ViewerMemory
 } from "./schemas";
 
@@ -957,6 +958,26 @@ export const vintageJewelryLiveSessionSpec: LiveSessionSpec = {
   ],
   approvalMode: "hybrid",
   enabledTools: validLiveSessionSpec.enabledTools
+};
+
+export const validShopeeStartLivestreamCommand: ShopeeStartLivestreamCommand = {
+  commandId: "cmd-prepare-livestream-vintage-jewelry",
+  sessionId: vintageJewelryLiveSessionSpec.sessionId,
+  kind: "prepare_livestream",
+  createdAt: "2026-06-06T02:45:00.000Z",
+  approvalId: "approval-prepare-livestream-vintage-jewelry",
+  approvalStatus: "approved",
+  safetyMode: "dry_run",
+  payload: {
+    title: vintageJewelryLiveSessionSpec.title,
+    productIds: vintageJewelryLiveSessionSpec.products.map((product) => product.id),
+    publicOverlayUrl: "/?runtimeOrigin=http%3A%2F%2F127.0.0.1%3A8787&sessionId=live-vintage-jewelry-001",
+    streamCredentialHandling: "manual_or_server_env_only",
+    rtmpEvidence: "redacted",
+    cameraPreviewRequired: true,
+    goLive: false
+  },
+  citations: [vintageJewelryCitation]
 };
 
 export const vintageJewelrySessionMemory: SessionMemory = {

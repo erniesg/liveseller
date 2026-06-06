@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { validLiveSessionSpec, validOverlayState, vintageJewelryLiveSessionSpec } from "@liveseller/contracts";
+import { type RuntimeEvent, validLiveSessionSpec, validOverlayState, vintageJewelryLiveSessionSpec } from "@liveseller/contracts";
 import { App, RuntimeOverlay, fetchOverlayState, formatCountdown } from "../src/App";
 import { SellerConsole } from "../src/SellerConsole";
 
@@ -207,5 +207,95 @@ describe("public overlay", () => {
         })
       ])
     ));
+  });
+
+  it("starts a three-product run of show without storing stream credentials", async () => {
+    const currentProduct = vintageJewelryLiveSessionSpec.products[0]!;
+    const overlayState = {
+      ...validOverlayState,
+      sessionId: vintageJewelryLiveSessionSpec.sessionId,
+      currentProductId: currentProduct.id,
+      productCard: {
+        productId: currentProduct.id,
+        title: currentProduct.title,
+        price: currentProduct.price,
+        currency: currentProduct.currency,
+        stock: currentProduct.stock,
+        imageUri: currentProduct.media.images[0]!.uri
+      }
+    };
+    const requests: unknown[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith(`/api/live-sessions/${vintageJewelryLiveSessionSpec.sessionId}/spec`)) {
+        return new Response(JSON.stringify(vintageJewelryLiveSessionSpec), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.endsWith(`/api/overlay/${vintageJewelryLiveSessionSpec.sessionId}`)) {
+        return new Response(JSON.stringify(overlayState), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.endsWith("/api/runtime/events")) {
+        const event = JSON.parse(String(init?.body));
+        requests.push(event);
+        const product = event.type === "product_switch"
+          ? vintageJewelryLiveSessionSpec.products.find((candidate) => candidate.id === event.payload.productId) ?? currentProduct
+          : currentProduct;
+        return new Response(
+          JSON.stringify({
+            overlayState: {
+              ...overlayState,
+              currentProductId: product.id,
+              productCard: {
+                productId: product.id,
+                title: product.title,
+                price: product.price,
+                currency: product.currency,
+                stock: product.stock,
+                imageUri: product.media.images[0]!.uri
+              }
+            },
+            actions: []
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+      return new Response(JSON.stringify({ error: "not_found" }), { status: 404 });
+    });
+
+    render(
+      <SellerConsole
+        runtimeOrigin="http://runtime.test"
+        sessionId={vintageJewelryLiveSessionSpec.sessionId}
+        fetchImpl={fetchImpl as typeof fetch}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText(vintageJewelryLiveSessionSpec.title)).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Start show"));
+
+    await waitFor(() => expect(requests.filter((event) => (event as RuntimeEvent).type === "product_switch")).toHaveLength(3));
+    expect(requests[0]).toMatchObject({
+      sessionId: vintageJewelryLiveSessionSpec.sessionId,
+      type: "stream_lifecycle",
+      payload: {
+        status: "started"
+      }
+    });
+    expect(requests.map((event) => (event as RuntimeEvent).type)).toEqual([
+      "stream_lifecycle",
+      "product_switch",
+      "product_switch",
+      "product_switch"
+    ]);
+    expect(JSON.stringify(requests).toLowerCase()).not.toContain("streamkey");
+    expect(JSON.stringify(requests).toLowerCase()).not.toContain("rtmp://");
   });
 });
