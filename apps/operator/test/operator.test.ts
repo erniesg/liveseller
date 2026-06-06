@@ -117,6 +117,52 @@ describe("Codex app-server operator review loop", () => {
     expect(updated.createProductCommands).toEqual([]);
   });
 
+  it("uses generated clean-background image outputs in approved create-product commands", async () => {
+    const generatedDataUrl = "data:image/png;base64,Z2VuZXJhdGVkLWNsZWFuLWJn";
+    const withImage = await executeCodexReviewToolCall(
+      { reviewPlan: validProductReviewPlan, createProductCommands: [] },
+      {
+        tool: "liveseller_generate_image_edits",
+        arguments: {}
+      },
+      {
+        imageEditRunner: async ({ reviewPlan }) => ({
+          completedAt: "2026-06-06T04:13:00.000Z",
+          taskOutputs: reviewPlan.generationTasks
+            .filter((task) => task.status === "pending" && task.taskType === "image_edit")
+            .map((task) => ({
+              taskId: task.taskId,
+              outputRefs: [generatedDataUrl]
+            }))
+        })
+      }
+    );
+    const approved = await executeCodexReviewToolCall(withImage, {
+      tool: "liveseller_record_product_review_decision",
+      arguments: {
+        decision: {
+          decisionId: "decision-generated-image-approved",
+          productId: validProductReviewPlan.items[0]!.productId,
+          status: "approved",
+          decidedBy: "seller",
+          decidedAt: "2026-06-06T04:15:00.000Z",
+          reason: "Seller approved the generated clean-background product image.",
+          citations: validProductReviewPlan.items[0]!.product.evidence
+        }
+      }
+    });
+    const published = await executeCodexReviewToolCall(approved, {
+      tool: "liveseller_build_create_product_commands",
+      arguments: {}
+    });
+
+    expect(published.createProductCommands).toHaveLength(1);
+    expect(published.createProductCommands[0]?.payload.product.media.images[0]).toMatchObject({
+      uri: generatedDataUrl,
+      alt: expect.stringContaining("clean background generated image")
+    });
+  });
+
   it("rejects image edit tool calls when no worker is configured", async () => {
     await expect(executeCodexReviewToolCall(
       { reviewPlan: validProductReviewPlan, createProductCommands: [] },
@@ -298,7 +344,7 @@ describe("Codex app-server operator review loop", () => {
       expect(body.interpretedCalls).toContain("liveseller_generate_image_edits");
       expect(body.reviewPlan.items[0].reviewRounds).toHaveLength(2);
       expect(body.reviewPlan.generationTasks.some((task: { outputRefs: string[] }) =>
-        task.outputRefs.some((ref) => ref.startsWith("generated/operator-"))
+        task.outputRefs.some((ref) => ref.startsWith("data:image/"))
       )).toBe(true);
       expect(body.createProductCommands).toEqual([]);
       expect(body.operatorEvents.map((event: { type: string }) => event.type)).toContain("turn_completed");

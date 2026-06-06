@@ -580,6 +580,7 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("requestPlanChanges");
     expect(sidePanelScript).toContain("Request changes");
     expect(sidePanelScript).toContain("liveseller_record_product_review_decision");
+    expect(sidePanelScript).toContain("liveseller_generate_image_edits");
     expect(sidePanelScript).toContain("cachedPlanStorageKey");
     expect(sidePanelScript).toContain('$("#load-cached-plan").addEventListener("click", loadCachedPlan)');
     expect(sidePanelScript).toContain("writeDraftFields({})");

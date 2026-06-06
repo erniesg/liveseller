@@ -1119,6 +1119,10 @@ async function submitDecision(card, item, status) {
             arguments: { decision }
           },
           {
+            tool: "liveseller_generate_image_edits",
+            arguments: {}
+          },
+          {
             tool: "liveseller_build_create_product_commands",
             arguments: {}
           }
@@ -1211,6 +1215,10 @@ async function approveAll() {
         arguments: { decision }
       }
     ]);
+    calls.push({
+      tool: "liveseller_generate_image_edits",
+      arguments: {}
+    });
     calls.push({
       tool: "liveseller_build_create_product_commands",
       arguments: {}

@@ -170,14 +170,45 @@ export function buildShopeeCreateProductCommands(
   plan: ProductReviewPlan,
   createdAt = new Date().toISOString()
 ): ShopeeCreateProductCommand[] {
+  function productWithGeneratedImage(item: ProductReviewPlan["items"][number]) {
+    const product = item.decision.status === "edited" && item.decision.editedProduct
+      ? item.decision.editedProduct
+      : item.product;
+    const imageTask = plan.generationTasks.find((task) =>
+      task.productId === item.productId &&
+      task.taskType === "image_edit" &&
+      task.status === "completed" &&
+      task.outputRefs.some((ref) => ref.startsWith("data:image/"))
+    );
+    const generatedUri = imageTask?.outputRefs.find((ref) => ref.startsWith("data:image/"));
+    const baseImage = product.media.images[0];
+    if (!imageTask || !generatedUri || !baseImage) {
+      return product;
+    }
+    return {
+      ...product,
+      media: {
+        ...product.media,
+        images: [
+          {
+            ...baseImage,
+            id: `${baseImage.id}-generated-clean-bg`,
+            uri: generatedUri,
+            alt: `${product.title} clean background generated image`,
+            citations: imageTask.citations.length > 0 ? imageTask.citations : baseImage.citations
+          },
+          ...product.media.images.slice(1)
+        ]
+      }
+    };
+  }
+
   return plan.items.flatMap((item) => {
     if (item.decision.status !== "approved" && item.decision.status !== "edited") {
       return [];
     }
 
-    const product = item.decision.status === "edited" && item.decision.editedProduct
-      ? item.decision.editedProduct
-      : item.product;
+    const product = productWithGeneratedImage(item);
 
     return [
       ShopeeCreateProductCommandSchema.parse({

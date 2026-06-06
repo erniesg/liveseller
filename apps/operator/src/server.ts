@@ -148,6 +148,69 @@ function operatorEvent(event: Omit<CodexOperatorEvent, "timestamp">): CodexOpera
   };
 }
 
+const FALLBACK_GENERATED_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
+function firstDataImageRef(refs: string[]): string | undefined {
+  return refs.find((ref) => ref.startsWith("data:image/"));
+}
+
+function imageBlobFromDataUrl(dataUrl: string, fallbackType = "image/jpeg") {
+  const [header, base64] = dataUrl.split(",");
+  if (!header?.startsWith("data:") || !base64) {
+    return undefined;
+  }
+  const mimeType = header.match(/^data:([^;]+)/u)?.[1] ?? fallbackType;
+  return {
+    mimeType,
+    bytes: Buffer.from(base64, "base64")
+  };
+}
+
+async function generateCleanBackgroundImage(options: {
+  apiKey: string;
+  imageDataUrl: string;
+  fileName: string;
+  fetchImpl: typeof fetch;
+}): Promise<string> {
+  const image = imageBlobFromDataUrl(options.imageDataUrl);
+  if (!image) {
+    throw new Error("Image edit task input was not a data image URL.");
+  }
+  const form = new FormData();
+  form.append("model", "gpt-image-2");
+  form.append("image", new Blob([new Uint8Array(image.bytes)], { type: image.mimeType }), options.fileName);
+  form.append(
+    "prompt",
+    [
+      "Remove the background from this product photo for a Shopee listing.",
+      "Preserve the exact product, visible condition, color, shape, and included parts.",
+      "Use a clean white or transparent studio background.",
+      "Do not add text, logos, props, certificates, packaging, claims, or extra product parts."
+    ].join(" ")
+  );
+  form.append("quality", "low");
+  form.append("size", "1024x1024");
+  form.append("output_format", "png");
+
+  const response = await options.fetchImpl("https://api.openai.com/v1/images/edits", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${options.apiKey}`
+    },
+    body: form
+  });
+  if (!response.ok) {
+    throw new Error(`OpenAI image edit failed: ${response.status} ${await response.text()}`);
+  }
+  const body = await response.json() as { data?: Array<{ b64_json?: string }> };
+  const base64 = body.data?.[0]?.b64_json;
+  if (!base64) {
+    throw new Error("OpenAI image edit response did not include data[0].b64_json");
+  }
+  return `data:image/png;base64,${base64}`;
+}
+
 function buildDeterministicImageRunner(): CodexImageEditRunner {
   return async ({ reviewPlan }) => ({
     completedAt: now(),
@@ -155,14 +218,52 @@ function buildDeterministicImageRunner(): CodexImageEditRunner {
       .filter((task) => task.status === "pending" && task.taskType === "image_edit")
       .map((task) => ({
         taskId: task.taskId,
-        outputRefs: [`generated/operator-${task.taskId}.png`]
+        outputRefs: [firstDataImageRef(task.inputRefs) ?? FALLBACK_GENERATED_PNG_DATA_URL]
       }))
   });
 }
 
+function buildOperatorImageRunner(fetchImpl: typeof fetch = fetch): CodexImageEditRunner {
+  return async ({ reviewPlan }) => {
+    loadEnvFile();
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return buildDeterministicImageRunner()({ reviewPlan });
+    }
+
+    const taskOutputs = await Promise.all(reviewPlan.generationTasks
+      .filter((task) => task.status === "pending" && task.taskType === "image_edit")
+      .map(async (task) => {
+        const sourceImage = firstDataImageRef(task.inputRefs);
+        if (!sourceImage) {
+          return {
+            taskId: task.taskId,
+            outputRefs: [FALLBACK_GENERATED_PNG_DATA_URL],
+            error: "No uploadable data image URL was available for this image edit task."
+          };
+        }
+        const outputRef = await generateCleanBackgroundImage({
+          apiKey,
+          imageDataUrl: sourceImage,
+          fileName: `${task.taskId}.png`,
+          fetchImpl
+        });
+        return {
+          taskId: task.taskId,
+          outputRefs: [outputRef]
+        };
+      }));
+    return {
+      completedAt: now(),
+      taskOutputs
+    };
+  };
+}
+
 async function runToolCalls(
   initialState: CodexReviewToolState,
-  calls: CodexReviewToolCall[]
+  calls: CodexReviewToolCall[],
+  imageEditRunner: CodexImageEditRunner = buildOperatorImageRunner()
 ): Promise<CodexReviewToolState & { operatorEvents: CodexOperatorEvent[] }> {
   let state = initialState;
   const operatorEvents: CodexOperatorEvent[] = [
@@ -180,7 +281,7 @@ async function runToolCalls(
       callId: `http-${operatorEvents.length}`
     }));
     const result = await executeCodexReviewToolCall(state, call, {
-      imageEditRunner: buildDeterministicImageRunner()
+      imageEditRunner
     });
     state = {
       reviewPlan: result.reviewPlan,
@@ -439,9 +540,13 @@ function buildSidepanelReviewPlan(input: SidepanelDraftRequest, generatedDrafts:
   return buildProductReviewPlan(session, identityDrafts, guidance, imagePlan, sellerUiPolicy, generatedAt);
 }
 
-export function createOperatorHttpServer(options: { sidepanelDraftGenerator?: SidepanelDraftGenerator } = {}) {
+export function createOperatorHttpServer(options: {
+  sidepanelDraftGenerator?: SidepanelDraftGenerator;
+  imageEditRunner?: CodexImageEditRunner;
+} = {}) {
   const timeline = createOperatorTimelineStore();
   const sidepanelDraftGenerator = options.sidepanelDraftGenerator ?? generateSidepanelDraftWithOpenAi;
+  const imageEditRunner = options.imageEditRunner ?? buildOperatorImageRunner();
   return createServer(async (req, res) => {
     try {
       if (req.method === "OPTIONS") {
@@ -476,7 +581,8 @@ export function createOperatorHttpServer(options: { sidepanelDraftGenerator?: Si
             reviewPlan: payload.reviewPlan,
             createProductCommands: payload.createProductCommands as ShopeeCreateProductCommand[]
           },
-          calls
+          calls,
+          imageEditRunner
         );
         for (const event of result.operatorEvents) {
           timeline.append({
@@ -501,7 +607,8 @@ export function createOperatorHttpServer(options: { sidepanelDraftGenerator?: Si
             reviewPlan: payload.reviewPlan,
             createProductCommands: payload.createProductCommands as ShopeeCreateProductCommand[]
           },
-          calls
+          calls,
+          imageEditRunner
         );
         for (const event of result.operatorEvents) {
           timeline.append({
