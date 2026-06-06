@@ -135,6 +135,19 @@ export function createRuntimeSessionStore(session: LiveSessionSpec): RuntimeSess
 
   return {
     route(event) {
+      if (event.sessionId !== session.sessionId) {
+        throw new Error(`Runtime event sessionId ${event.sessionId} does not match ${session.sessionId}`);
+      }
+      if (event.type === "product_switch" && !productDb.has(event.payload.productId)) {
+        throw new Error(`Runtime product_switch references unknown productId ${event.payload.productId}`);
+      }
+      if (
+        event.type === "promo_update" &&
+        !session.promos.some((promo) => promo.id === event.payload.promoId)
+      ) {
+        throw new Error(`Runtime promo_update references unknown promoId ${event.payload.promoId}`);
+      }
+
       const result = routeRuntimeEvent(event, session, {
         viewerMemory: event.type === "viewer_chat" ? viewerMemory.get(event.payload.viewerId) : undefined,
         sessionMemory,

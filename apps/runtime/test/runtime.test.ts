@@ -293,6 +293,181 @@ describe("live brain policy runtime", () => {
     }
   });
 
+  it("routes livestream tab events over HTTP into product context, viewer memory, overlay, and audit", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    const origin = `http://127.0.0.1:${address.port}`;
+    const secondProduct = validLiveSessionSpec.products[1]!;
+
+    async function postEvent(event: RuntimeEvent) {
+      const response = await fetch(`${origin}/api/runtime/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(event)
+      });
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      return body;
+    }
+
+    try {
+      await postEvent({
+        eventId: "event-http-product-switch",
+        sessionId: validLiveSessionSpec.sessionId,
+        timestamp: "2026-06-06T02:20:00.000Z",
+        source: "seller",
+        type: "product_switch",
+        payload: {
+          productId: secondProduct.id
+        }
+      });
+      await postEvent({
+        eventId: "event-http-video-transcript",
+        sessionId: validLiveSessionSpec.sessionId,
+        timestamp: "2026-06-06T02:21:00.000Z",
+        source: "host",
+        type: "host_transcript",
+        payload: {
+          text: "这款收纳包适合旅行用，线材和耳机都可以放",
+          language: "zh",
+          confidence: 0.96
+        }
+      });
+      const viewerResult = await postEvent({
+        eventId: "event-http-viewer-memory",
+        sessionId: validLiveSessionSpec.sessionId,
+        timestamp: "2026-06-06T02:22:00.000Z",
+        source: "viewer",
+        type: "viewer_chat",
+        payload: {
+          viewerId: "viewer-live-ctx",
+          viewerName: "Live Buyer",
+          text: "How much stock for travel pouch?",
+          language: "en"
+        }
+      });
+
+      expect(viewerResult.context.currentProductId).toBe(secondProduct.id);
+      expect(viewerResult.context.structuredFacts).toMatchObject({
+        productIds: [secondProduct.id],
+        canonicalFields: expect.arrayContaining(["price", "stock", "sku", "variants"])
+      });
+      expect(viewerResult.actions.some((action: { type: string }) => action.type === "send_reply")).toBe(true);
+      expect(viewerResult.actions.every((action: { requiresApproval: boolean }) => !action.requiresApproval)).toBe(true);
+
+      const [memoryResponse, overlayResponse, auditResponse, summaryResponse] = await Promise.all([
+        fetch(`${origin}/api/live-sessions/${validLiveSessionSpec.sessionId}/memory`),
+        fetch(`${origin}/api/overlay/${validLiveSessionSpec.sessionId}`),
+        fetch(`${origin}/api/audit/${validLiveSessionSpec.sessionId}`),
+        fetch(`${origin}/api/live-sessions/${validLiveSessionSpec.sessionId}/summary`)
+      ]);
+      const memory = await memoryResponse.json();
+      const overlay = await overlayResponse.json();
+      const audit = await auditResponse.json();
+      const summary = await summaryResponse.json();
+
+      expect(memory.currentProductId).toBe(secondProduct.id);
+      expect(memory.sessionMemory.productInterest[secondProduct.id]).toBeGreaterThan(0);
+      expect(memory.viewerMemory[0]).toMatchObject({
+        viewerId: "viewer-live-ctx",
+        displayName: "Live Buyer",
+        preferredLanguage: "en",
+        productAffinity: {
+          [secondProduct.id]: 1
+        }
+      });
+      expect(overlay.currentProductId).toBe(secondProduct.id);
+      expect(overlay.productCard).toMatchObject({
+        productId: secondProduct.id,
+        title: secondProduct.title,
+        stock: secondProduct.stock
+      });
+      expect(overlay.caption).toMatchObject({
+        text: "这款收纳包适合旅行用，线材和耳机都可以放",
+        language: "zh",
+        visible: true
+      });
+      expect(audit.map((event: { kind: string }) => event.kind)).toEqual(
+        expect.arrayContaining(["input", "context", "model_action", "tool_result"])
+      );
+      expect(summary).toMatchObject({
+        eventCount: 3,
+        currentProductId: secondProduct.id,
+        publicReplies: 1
+      });
+      expect(summary.moments.map((moment: { kind: string }) => moment.kind)).toEqual(
+        expect.arrayContaining(["product_switch", "host_caption", "viewer_question"])
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
+  it("rejects runtime events from the wrong live session before mutating state", async () => {
+    const store = createRuntimeSessionStore(validLiveSessionSpec);
+
+    expect(() =>
+      store.route({
+        eventId: "event-wrong-session",
+        sessionId: "other-live-session",
+        timestamp: "2026-06-06T02:20:00.000Z",
+        source: "viewer",
+        type: "viewer_chat",
+        payload: {
+          viewerId: "viewer-wrong-session",
+          viewerName: "Wrong Session",
+          text: "How much is it?",
+          language: "en"
+        }
+      })
+    ).toThrow("does not match");
+
+    expect(store.snapshot().auditEvents).toHaveLength(0);
+    expect(store.snapshot().viewerMemory).toHaveLength(0);
+  });
+
+  it("rejects unstructured product and promo runtime events before mutating state", () => {
+    const store = createRuntimeSessionStore(validLiveSessionSpec);
+
+    expect(() =>
+      store.route({
+        eventId: "event-unknown-product",
+        sessionId: validLiveSessionSpec.sessionId,
+        timestamp: "2026-06-06T02:23:00.000Z",
+        source: "seller",
+        type: "product_switch",
+        payload: {
+          productId: "prod-unstructured"
+        }
+      })
+    ).toThrow("unknown productId");
+
+    expect(() =>
+      store.route({
+        eventId: "event-unknown-promo",
+        sessionId: validLiveSessionSpec.sessionId,
+        timestamp: "2026-06-06T02:24:00.000Z",
+        source: "seller",
+        type: "promo_update",
+        payload: {
+          promoId: "promo-unstructured",
+          remainingQuantity: 12
+        }
+      })
+    ).toThrow("unknown promoId");
+
+    expect(store.snapshot().currentProductId).toBe(validLiveSessionSpec.products[0]!.id);
+    expect(store.snapshot().currentPromoId).toBe(validLiveSessionSpec.promos[0]!.id);
+    expect(store.snapshot().auditEvents).toHaveLength(0);
+  });
+
   it("finalizes prep review decisions over HTTP and returns create-product commands", async () => {
     const server = createRuntimeServer();
     await new Promise<void>((resolve) => server.listen(0, resolve));
