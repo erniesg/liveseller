@@ -6,7 +6,7 @@ This document is the required real-path checkpoint before relying on Shopee sele
 
 - Status: not yet audited.
 - Blocker label: `REAL_SHOPEE_UI_AUDIT_REQUIRED`.
-- Reason: this repo provides the extension/content-script skeleton and deterministic command safety, but no authenticated Shopee seller tab has been inspected yet.
+- Reason: this repo provides the extension/content-script runtime bridge and deterministic command safety, but no authenticated Shopee seller tab has been inspected yet.
 
 ## Required Evidence
 
@@ -25,11 +25,21 @@ Record these before enabling real sends:
 | Capability | Local Status | Real Shopee Status | Notes |
 | --- | --- | --- | --- |
 | Capture non-host viewer message | Implemented with DOM-row helper | Blocked pending audit | Needs selector proof |
+| Hook `receiveNormalUserMessage` | Implemented with page-handler wrapper and runtime POST test | Blocked pending audit | Needs authenticated seller-tab event proof |
 | Draft safe reply | Implemented in command executor | Blocked pending audit | Must protect seller typing |
 | Send low-risk reply | Implemented in command executor | Blocked pending audit | Enable only after real proof |
 | Escalate risky message | Implemented as seller-only command | Blocked pending audit | No public auto-send |
 | Read active product | Contracted | Blocked pending audit | Needs seller UI selector |
 | Show overlay promo | Implemented in overlay app | Mock only | Must distinguish Shopee-backed vs overlay-only |
+
+## Local Dynamic Payload Proof
+
+- `npm --workspace @liveseller/extension run test`
+  - Verifies the `receiveNormalUserMessage` hook preserves the original page callback.
+  - Verifies a Shopee-like payload is normalized into `RuntimeEvent.viewer_chat`.
+  - Verifies the event is posted to `/api/runtime/events`.
+  - Verifies returned `LiveAction` evidence is rendered with `data-liveseller-action-id`.
+  - Verifies returned actions still pass through deterministic extension command safety.
 
 ## Manual Proof Script
 

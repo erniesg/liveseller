@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run apps/extension/test"
+    "test": "vitest run --root ../.. --config vitest.config.ts apps/extension/test/extension.test.ts"
   },
   "dependencies": {
     "@liveseller/contracts": "0.1.0"

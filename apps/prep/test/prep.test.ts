@@ -2,9 +2,14 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type EvidenceCitation,
+  type ProductRecord,
   LiveSessionSpecSchema,
   ProductRecordSchema,
-  PromoRecordSchema
+  PromoRecordSchema,
+  seedCitation,
+  validProducts,
+  vintageJewelryLiveSessionSpec
 } from "@liveseller/contracts";
 import {
   buildSellerDropFolderExtraction,
@@ -42,6 +47,43 @@ function createSellerDropFolderFixture() {
     writeFileSync(join(folder, fileName), "fixture image bytes");
   }
   return folder;
+}
+
+function dropImageCitation(fileName: string): EvidenceCitation {
+  return {
+    sourceId: "test-drop",
+    sourceType: "image",
+    locator: `apps/overlay/public/assets/products/test/${fileName}`,
+    excerpt: `Seller supplied product photo copied from drop-folder file: ${fileName}`,
+    confidence: 0.9
+  };
+}
+
+function customDropProduct(fileNames: string[]): ProductRecord {
+  return {
+    ...validProducts[0]!,
+    id: "prod-custom-camera-strap",
+    sku: "LS-CUSTOM-STRAP-001",
+    title: "Custom Camera Strap",
+    aliases: ["camera strap", "strap"],
+    category: "Camera Accessories",
+    description: "Adjustable strap with stitched detail for live catalog testing.",
+    media: {
+      images: fileNames.map((fileName, index) => ({
+        id: `custom-strap-${index + 1}`,
+        uri: `/assets/products/test/custom-strap-${index + 1}.jpg`,
+        alt: `Custom camera strap angle ${index + 1}`,
+        citations: [dropImageCitation(fileName)]
+      })),
+      videos: []
+    },
+    evidence: [seedCitation],
+    listingDraft: {
+      title: "Custom Camera Strap",
+      description: "Adjustable stitched camera strap.",
+      bulletPoints: ["Adjustable strap", "Structured fixture product", "Human validation required"]
+    }
+  };
 }
 
 describe("prep catalog brain", () => {
@@ -102,6 +144,28 @@ describe("prep catalog brain", () => {
     expect(assets.groups.map((group) => group.imageFiles.length)).toEqual([5, 4, 10]);
   });
 
+  it("discovers arbitrary seller-drop products from product image citations", () => {
+    const folder = mkdtempSync(join(tmpdir(), "liveseller-custom-drop-"));
+    const fileNames = ["custom-strap.jpg", "custom-strap (1).jpg"];
+    for (const fileName of fileNames) {
+      writeFileSync(join(folder, fileName), "fixture image bytes");
+    }
+
+    const assets = discoverSellerDropFolderAssets(folder, [customDropProduct(fileNames)]);
+
+    expect(assets.images.map((image) => image.fileName)).toEqual(fileNames);
+    expect(assets.groups).toEqual([
+      expect.objectContaining({
+        productId: "prod-custom-camera-strap",
+        label: "Custom Camera Strap",
+        imageFiles: expect.arrayContaining([
+          expect.objectContaining({ productImageId: "custom-strap-1" }),
+          expect.objectContaining({ productImageId: "custom-strap-2" })
+        ])
+      })
+    ]);
+  });
+
   it("builds a shared seller-drop LiveSessionSpec with guidance and image generation prompts", () => {
     const sellerDropFolder = createSellerDropFolderFixture();
     const result = buildSellerDropFolderExtraction(sellerDropFolder);
@@ -115,6 +179,31 @@ describe("prep catalog brain", () => {
       true
     );
     expect(result.sellerGuidance[0]?.talkTrack).toContain("grape");
+    expect(() => LiveSessionSpecSchema.parse(result.liveSessionSpec)).not.toThrow();
+  });
+
+  it("builds seller-drop extraction for a supplied product fixture set", () => {
+    const folder = mkdtempSync(join(tmpdir(), "liveseller-custom-extraction-"));
+    const fileNames = ["custom-strap.jpg", "custom-strap (1).jpg"];
+    for (const fileName of fileNames) {
+      writeFileSync(join(folder, fileName), "fixture image bytes");
+    }
+
+    const product = customDropProduct(fileNames);
+    const result = buildSellerDropFolderExtraction(folder, {
+      products: [product],
+      liveSessionSpec: {
+        ...vintageJewelryLiveSessionSpec,
+        sessionId: "live-custom-drop-001",
+        products: [product]
+      }
+    });
+
+    expect(result.liveSessionSpec.products).toHaveLength(1);
+    expect(result.assets.filter((asset) => asset.kind === "product_image")).toHaveLength(2);
+    expect(result.sellerGuidance[0]?.talkTrack).toContain("Custom Camera Strap");
+    expect(result.imageGenerationPlan[0]?.sourceImageUris).toEqual(product.media.images.map((image) => image.uri));
+    expect(result.imageGenerationPlan[0]?.prompts.join(" ")).toContain("Camera Accessories");
     expect(() => LiveSessionSpecSchema.parse(result.liveSessionSpec)).not.toThrow();
   });
 });

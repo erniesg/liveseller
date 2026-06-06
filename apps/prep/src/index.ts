@@ -63,6 +63,11 @@ export type SellerDropFolderAssets = {
   groups: SellerDropFolderGroup[];
 };
 
+export type SellerDropFolderExtractionOptions = {
+  products?: ProductRecord[];
+  liveSessionSpec?: LiveSessionSpec;
+};
+
 export type SellerGuidance = {
   productId: string;
   talkTrack: string;
@@ -140,135 +145,152 @@ export function buildMissingFieldReport(
   };
 }
 
-const dropFolderGroups = [
-  {
-    prefix: "金色新品合集",
-    productId: "prod-vintage-gold-grape-leaf-brooch",
-    label: "Vintage gold-tone grape leaf brooch"
-  },
-  {
-    prefix: "新品又上一组",
-    productId: "prod-vintage-blue-stone-bar-brooch",
-    label: "Vintage blue stone bar brooch"
-  },
-  {
-    prefix: "新鲜出炉的卡霉霉",
-    productId: "prod-vintage-cameo-brooch",
-    label: "Vintage cream cameo brooch"
-  }
-] as const;
-
 const supportedImageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
-function resolveDropFolderGroup(fileName: string): (typeof dropFolderGroups)[number] {
-  const group = dropFolderGroups.find((candidate) => fileName.startsWith(candidate.prefix));
-  if (!group) {
-    throw new Error(`Unsupported seller drop-folder image group: ${fileName}`);
-  }
-  return group;
+type DropFolderImageMatch = {
+  product: ProductRecord;
+  productIndex: number;
+  image: ProductRecord["media"]["images"][number];
+  imageIndex: number;
+};
+
+function dropFolderFileNameFromCitation(citation: EvidenceCitation): string | undefined {
+  const match = citation.excerpt.match(/drop-folder file:\s*(.+)$/u);
+  return match?.[1]?.trim();
 }
 
-function groupIndex(productId: string): number {
-  const index = dropFolderGroups.findIndex((group) => group.productId === productId);
-  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
-}
+function buildDropFolderImageIndex(products: ProductRecord[]): Map<string, DropFolderImageMatch> {
+  const index = new Map<string, DropFolderImageMatch>();
 
-function imageOrder(fileName: string): number {
-  const match = fileName.match(/\((\d+)\)\.[^.]+$/u);
-  return match?.[1] ? Number(match[1]) : 0;
+  products.forEach((product, productIndex) => {
+    product.media.images.forEach((image, imageIndex) => {
+      image.citations.forEach((citation) => {
+        const fileName = dropFolderFileNameFromCitation(citation);
+        if (!fileName) {
+          return;
+        }
+        if (index.has(fileName)) {
+          throw new Error(`Duplicate seller drop-folder image citation: ${fileName}`);
+        }
+        index.set(fileName, {
+          product,
+          productIndex,
+          image,
+          imageIndex
+        });
+      });
+    });
+  });
+
+  return index;
 }
 
 export function discoverSellerDropFolderAssets(
-  folder = DEFAULT_SELLER_DROP_FOLDER
+  folder = DEFAULT_SELLER_DROP_FOLDER,
+  products = vintageJewelryProducts
 ): SellerDropFolderAssets {
   if (!existsSync(folder) || !statSync(folder).isDirectory()) {
     throw new Error(`Seller drop folder not found: ${folder}`);
   }
 
+  const imageIndex = buildDropFolderImageIndex(products);
   const files = readdirSync(folder)
-    .filter((fileName) => supportedImageExtensions.has(extname(fileName).toLowerCase()))
-    .sort((left, right) => {
-      const leftGroup = resolveDropFolderGroup(left);
-      const rightGroup = resolveDropFolderGroup(right);
-      if (leftGroup.productId !== rightGroup.productId) {
-        return groupIndex(leftGroup.productId) - groupIndex(rightGroup.productId);
-      }
-      return imageOrder(left) - imageOrder(right);
-    });
-
-  const fixtureImageByProduct = Object.fromEntries(
-    vintageJewelryProducts.map((product) => [product.id, product.media.images])
-  );
+    .filter((fileName) => supportedImageExtensions.has(extname(fileName).toLowerCase()));
 
   const images = files.map((fileName) => {
-    const group = resolveDropFolderGroup(fileName);
-    const productImages = fixtureImageByProduct[group.productId] ?? [];
-    const productImage = productImages[imageOrder(fileName)];
-    if (!productImage) {
-      throw new Error(`No shared fixture image for seller drop file: ${fileName}`);
+    const match = imageIndex.get(fileName);
+    if (!match) {
+      throw new Error(
+        `Unsupported seller drop-folder image: ${fileName}. Add a product image citation ending with "drop-folder file: ${fileName}".`
+      );
     }
 
     return {
       fileName,
       absolutePath: join(folder, fileName),
-      productId: group.productId,
-      productImageId: productImage.id,
-      productImageUri: productImage.uri
+      productId: match.product.id,
+      productImageId: match.image.id,
+      productImageUri: match.image.uri,
+      productIndex: match.productIndex,
+      imageIndex: match.imageIndex
     };
-  });
+  }).sort((left, right) => {
+    if (left.productIndex !== right.productIndex) {
+      return left.productIndex - right.productIndex;
+    }
+    return left.imageIndex - right.imageIndex;
+  }).map(({ productIndex: _productIndex, imageIndex: _imageIndex, ...image }) => image);
 
-  const groups = dropFolderGroups.map((group) => ({
-    productId: group.productId,
-    label: group.label,
-    imageFiles: images.filter((image) => image.productId === group.productId)
-  }));
+  const groups = products
+    .map((product) => ({
+      productId: product.id,
+      label: product.title,
+      imageFiles: images.filter((image) => image.productId === product.id)
+    }))
+    .filter((group) => group.imageFiles.length > 0);
 
   return { folder, images, groups };
 }
 
+const sellerGuidanceOverrides: Record<string, Omit<SellerGuidance, "productId">> = {
+  "prod-vintage-gold-grape-leaf-brooch": {
+    talkTrack:
+      "Start with the grape clusters and layered leaf texture; show how the gold-tone finish catches light on a blazer or scarf.",
+    researchNotes: [
+      "Botanical grape-and-leaf motifs are easy for viewers to remember and compare.",
+      "Use visual language: gold-tone, sculpted leaves, raised grape beads.",
+      "Do not claim gold purity without seller certificate."
+    ],
+    likelyBuyerQuestions: ["Is it real gold?", "How heavy is it?", "Can it hold on a scarf?"],
+    riskNotes: ["Material and era claims need seller confirmation before public commitment."]
+  },
+  "prod-vintage-blue-stone-bar-brooch": {
+    talkTrack:
+      "Show the blue centerpiece first, then tilt under direct light so viewers see the rhinestone sparkle and bar shape.",
+    researchNotes: [
+      "The visual contrast between sky-blue stones, deep-blue center, and clear rhinestones is the main selling point.",
+      "Position as a statement accent for lapels, scarves, or dress necklines.",
+      "Describe stones visually unless certificates identify them."
+    ],
+    likelyBuyerQuestions: ["Are the blue stones turquoise?", "Any missing stones?", "Can you show the back pin?"],
+    riskNotes: ["Stone identity and condition promises should be checked on camera."]
+  },
+  "prod-vintage-cameo-brooch": {
+    talkTrack:
+      "Lead with the cameo portrait relief; move close to camera so buyers can inspect the carving depth and gold-tone rim.",
+    researchNotes: [
+      "Cameo styling reads strongly on livestream because the portrait relief is recognizable.",
+      "A side angle helps show raised carving and condition.",
+      "Avoid shell, stone, brand, or era claims unless supplied in seller docs."
+    ],
+    likelyBuyerQuestions: ["Is the cameo shell?", "Can I see the back?", "Any chips or cracks?"],
+    riskNotes: ["Authenticity and material questions require seller confirmation or a certificate."]
+  }
+};
+
 export function buildSellerGuidance(products = vintageJewelryProducts): SellerGuidance[] {
   return products.map((product) => {
-    if (product.id === "prod-vintage-gold-grape-leaf-brooch") {
+    const override = sellerGuidanceOverrides[product.id];
+    if (override) {
       return {
         productId: product.id,
-        talkTrack:
-          "Start with the grape clusters and layered leaf texture; show how the gold-tone finish catches light on a blazer or scarf.",
-        researchNotes: [
-          "Botanical grape-and-leaf motifs are easy for viewers to remember and compare.",
-          "Use visual language: gold-tone, sculpted leaves, raised grape beads.",
-          "Do not claim gold purity without seller certificate."
-        ],
-        likelyBuyerQuestions: ["Is it real gold?", "How heavy is it?", "Can it hold on a scarf?"],
-        riskNotes: ["Material and era claims need seller confirmation before public commitment."]
+        ...override
       };
     }
 
-    if (product.id === "prod-vintage-blue-stone-bar-brooch") {
-      return {
-        productId: product.id,
-        talkTrack:
-          "Show the blue centerpiece first, then tilt under direct light so viewers see the rhinestone sparkle and bar shape.",
-        researchNotes: [
-          "The visual contrast between sky-blue stones, deep-blue center, and clear rhinestones is the main selling point.",
-          "Position as a statement accent for lapels, scarves, or dress necklines.",
-          "Describe stones visually unless certificates identify them."
-        ],
-        likelyBuyerQuestions: ["Are the blue stones turquoise?", "Any missing stones?", "Can you show the back pin?"],
-        riskNotes: ["Stone identity and condition promises should be checked on camera."]
-      };
-    }
+    const variants = product.variants.map((variant) => variant.name).join(", ") || "single option";
+    const primaryImageAlt = product.media.images[0]?.alt ?? product.title;
 
     return {
       productId: product.id,
-      talkTrack:
-        "Lead with the cameo portrait relief; move close to camera so buyers can inspect the carving depth and gold-tone rim.",
+      talkTrack: `Open with ${product.title}; show ${primaryImageAlt.toLowerCase()}, then call out ${product.currency} ${product.price.toFixed(2)}, stock ${product.stock}, and variants: ${variants}.`,
       researchNotes: [
-        "Cameo styling reads strongly on livestream because the portrait relief is recognizable.",
-        "A side angle helps show raised carving and condition.",
-        "Avoid shell, stone, brand, or era claims unless supplied in seller docs."
+        `Structured category: ${product.category}.`,
+        product.description,
+        "Use only structured price, stock, SKU, variant, shipping, and return-policy fields for factual claims."
       ],
-      likelyBuyerQuestions: ["Is the cameo shell?", "Can I see the back?", "Any chips or cracks?"],
-      riskNotes: ["Authenticity and material questions require seller confirmation or a certificate."]
+      likelyBuyerQuestions: ["How much is it?", "How many are left?", "Which variants are available?"],
+      riskNotes: ["Material, compatibility, authenticity, warranty, and condition claims need seller confirmation if not in structured records."]
     };
   });
 }
@@ -279,19 +301,27 @@ export function buildImageGenerationPlan(products = vintageJewelryProducts): Ima
     model: "gpt-image-2",
     sourceImageUris: product.media.images.map((image) => image.uri),
     prompts: [
-      `Shopee-ready square cover for ${product.title}: preserve the exact product shape and visible condition, clean lint from the velvet, improve warm jewelry lighting, neutral cream background, no added gemstones, no brand marks, no text.`,
-      `Create a livestream overlay hero image for ${product.title}: crop for a vertical product card, keep the original jewelry unchanged, crisp macro detail, soft reflections, premium vintage styling.`,
-      `Create one alternate catalog angle for ${product.title}: use the supplied product photo as source, make the product easier to inspect, keep age-related patina visible, do not invent certificates or packaging.`
+      `Shopee-ready square cover for ${product.title} in ${product.category}: preserve the exact product shape, visible condition, color, and included parts; use a clean neutral background; no added features, brand marks, certificates, packaging, or text.`,
+      `Create a livestream overlay hero image for ${product.title}: crop for a vertical product card, keep the original product unchanged, make the main details easy to inspect, and avoid inventing materials or variants.`,
+      `Create one alternate catalog angle for ${product.title}: use the supplied product photo as source, clarify scale and surface detail, preserve any visible wear or condition marks, and do not create claims not backed by seller records.`
     ]
   }));
 }
 
 export function buildSellerDropFolderExtraction(
-  folder = DEFAULT_SELLER_DROP_FOLDER
+  folder = DEFAULT_SELLER_DROP_FOLDER,
+  options: SellerDropFolderExtractionOptions = {}
 ): PrepExtractionResult {
-  const dropAssets = discoverSellerDropFolderAssets(folder);
-  const products = vintageJewelryProducts.map((product) => ProductRecordSchema.parse(product));
-  const session = LiveSessionSpecSchema.parse(vintageJewelryLiveSessionSpec);
+  const sourceProducts = options.products ?? vintageJewelryProducts;
+  const dropAssets = discoverSellerDropFolderAssets(folder, sourceProducts);
+  const discoveredProductIds = new Set(dropAssets.groups.map((group) => group.productId));
+  const products = sourceProducts
+    .filter((product) => discoveredProductIds.has(product.id))
+    .map((product) => ProductRecordSchema.parse(product));
+  const session = LiveSessionSpecSchema.parse({
+    ...(options.liveSessionSpec ?? vintageJewelryLiveSessionSpec),
+    products
+  });
 
   return {
     products,
