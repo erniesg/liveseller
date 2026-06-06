@@ -35,7 +35,7 @@ npm run dev:overlay
 
 Show product card, overlay-only promo, quantity, countdown, Chinese source caption, and English translated caption.
 
-For Swara's local realtime proof, open `http://127.0.0.1:5173`, choose source and target languages in the host translator controls, click Start, and speak. The browser captures the local transcript, then the runtime emits `update_caption` and `emit_translation` actions. Set `OPENAI_API_KEY` on the runtime server for real server-side translation; without it, the runtime uses deterministic checkpoint translations.
+For Swara's local realtime proof, open `http://127.0.0.1:5173`, choose source and target languages in the host translator controls, click Start, and speak. The browser captures the local transcript, then the runtime emits `update_caption` and `emit_translation` actions. Stop or language-switch clears the live captions. If browser speech recognition misses Chinese, type the Chinese sentence in the manual transcript field and click Send to verify the same runtime translation path. Set `OPENAI_API_KEY` on the runtime server for real server-side translation; without it, the runtime uses deterministic checkpoint translations.
 
 ## 1:45-2:00 Summary
 

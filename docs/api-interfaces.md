@@ -27,6 +27,8 @@ Implemented in `apps/runtime/src/server.ts`.
   - Uses server-owned translation; if `OPENAI_API_KEY` is present the runtime calls OpenAI from the server, otherwise it falls back to deterministic checkpoint translations.
 - `GET /api/runtime/overlay-state`
   - Returns the latest in-memory `OverlayState` for local overlay polling.
+- `POST /api/runtime/captions/clear`
+  - Clears the latest source and translated captions while preserving product and promo overlay state.
 - `GET /api/audit/live-seed-001`
   - Returns in-memory audit events for local demo sessions.
 

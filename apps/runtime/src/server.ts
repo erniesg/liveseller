@@ -108,6 +108,21 @@ export function createRuntimeServer() {
         return;
       }
 
+      if (req.method === "POST" && req.url === "/api/runtime/captions/clear") {
+        overlayState = {
+          ...overlayState,
+          caption: {
+            ...overlayState.caption,
+            text: "",
+            visible: false
+          },
+          translatedCaptions: [],
+          updatedAt: new Date().toISOString()
+        };
+        sendJson(res, 200, overlayState);
+        return;
+      }
+
       if (req.method === "POST" && req.url === "/api/runtime/events") {
         const event = RuntimeEventSchema.parse(await readJson(req));
         sendJson(res, 200, await routeAndRemember(event));

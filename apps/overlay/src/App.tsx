@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { LanguageCode, OverlayState } from "@liveseller/contracts";
 import { validOverlayState } from "@liveseller/contracts";
 
@@ -80,27 +80,74 @@ async function postHostTranscript(
   return routed.overlayState;
 }
 
+async function clearRuntimeCaptions(runtimeBaseUrl: string): Promise<OverlayState> {
+  const response = await fetch(`${runtimeBaseUrl}/api/runtime/captions/clear`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Runtime rejected caption clear with HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as OverlayState;
+}
+
 function HostLiveControls({
   runtimeBaseUrl,
   onState
 }: {
   runtimeBaseUrl: string;
-  onState: (state: OverlayState) => void;
+  onState: Dispatch<SetStateAction<OverlayState>>;
 }) {
   const [sourceLanguage, setSourceLanguage] = useState<LanguageCode>("en");
   const [targetLanguage, setTargetLanguage] = useState<LanguageCode>("ms");
   const [isListening, setIsListening] = useState(false);
   const [status, setStatus] = useState("Ready");
+  const [manualText, setManualText] = useState("");
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+
+  function clearLocalCaptions() {
+    onState((previous) => ({
+      ...previous,
+      caption: {
+        ...previous.caption,
+        text: "",
+        language: sourceLanguage,
+        visible: false
+      },
+      translatedCaptions: [],
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  async function clearCaptions() {
+    clearLocalCaptions();
+    try {
+      onState(await clearRuntimeCaptions(runtimeBaseUrl));
+    } catch {
+      setStatus("Ready");
+    }
+  }
 
   async function sendTranscript(text: string) {
     if (!text.trim()) {
       return;
     }
+    const transcript = text.trim();
+    onState((previous) => ({
+      ...previous,
+      caption: {
+        text: transcript,
+        language: sourceLanguage,
+        visible: true
+      },
+      translatedCaptions: [],
+      updatedAt: new Date().toISOString()
+    }));
     setStatus("Translating");
     const nextState = await postHostTranscript(
       runtimeBaseUrl,
-      text.trim(),
+      transcript,
       sourceLanguage,
       targetLanguage
     );
@@ -112,6 +159,14 @@ function HostLiveControls({
     if (sourceLanguage === targetLanguage) {
       setTargetLanguage(languageOptions.find((language) => language.code !== sourceLanguage)?.code ?? "en");
     }
+  }, [sourceLanguage, targetLanguage]);
+
+  useEffect(() => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setIsListening(false);
+    setManualText("");
+    void clearCaptions();
   }, [sourceLanguage, targetLanguage]);
 
   function startListening() {
@@ -135,6 +190,7 @@ function HostLiveControls({
     };
     recognition.onerror = () => setStatus("Mic error");
     recognition.onend = () => setIsListening(false);
+    void clearCaptions();
     recognition.start();
     recognitionRef.current = recognition;
     setIsListening(true);
@@ -145,7 +201,12 @@ function HostLiveControls({
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setIsListening(false);
+    void clearCaptions();
     setStatus("Ready");
+  }
+
+  function submitManualTranscript() {
+    void sendTranscript(manualText).catch(() => setStatus("Runtime error"));
   }
 
   return (
@@ -178,6 +239,15 @@ function HostLiveControls({
         {isListening ? "Stop" : "Start"}
       </button>
       <span>{status}</span>
+      <input
+        aria-label="Manual transcript"
+        placeholder="Type transcript"
+        value={manualText}
+        onChange={(event) => setManualText(event.target.value)}
+      />
+      <button type="button" onClick={submitManualTranscript}>
+        Send
+      </button>
     </aside>
   );
 }
