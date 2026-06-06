@@ -61,10 +61,41 @@ describe("live brain policy runtime", () => {
       const actions = decideActions(buildContextEnvelope(viewerEvent(text, "en"), validLiveSessionSpec));
       expect(actions.some((action) => action.type === "send_reply")).toBe(false);
       expect(actions.every((action) => action.requiresApproval)).toBe(true);
+      expect(actions.every((action) => action.approvalId)).toBe(true);
+      expect(actions.every((action) => action.reason.length > 0)).toBe(true);
+      expect(actions.every((action) => action.citations.length > 0)).toBe(true);
       expect(actions.map((action) => action.type)).toEqual(
         expect.arrayContaining([expect.stringMatching(/draft_reply|escalate|request_approval/)])
       );
     }
+  });
+
+  it("records policy and approval audit proof for seller-controlled risky actions", () => {
+    const result = routeRuntimeEvent(
+      viewerEvent("Give me extra discount cheaper best price", "en"),
+      validLiveSessionSpec
+    );
+
+    const policyAudit = result.auditEvents.find((event) => event.kind === "policy");
+    const approvalAudit = result.auditEvents.find((event) => event.kind === "approval");
+    const action = result.actions.find((candidate) => candidate.requiresApproval);
+
+    expect(result.actions.some((candidate) => candidate.type === "send_reply")).toBe(false);
+    expect(policyAudit?.context?.policyFlags[0]).toMatchObject({
+      rule: "discount_negotiation",
+      risk: "medium"
+    });
+    expect(action?.approvalId).toBeDefined();
+    expect(approvalAudit?.approval).toMatchObject({
+      approvalId: action?.approvalId,
+      actionId: action?.actionId,
+      status: "pending",
+      reason: action?.reason
+    });
+    expect(approvalAudit?.approval?.originalAction).toMatchObject({
+      actionId: action?.actionId,
+      requiresApproval: true
+    });
   });
 
   it("emits source and translated captions for Chinese host speech", () => {
