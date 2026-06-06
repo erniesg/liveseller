@@ -7,6 +7,7 @@ import {
   type RuntimeEvent,
   type SessionMemory,
   type ViewerMemory,
+  OverlayStateSchema,
   SessionMemorySchema,
   ViewerMemorySchema,
   validSessionMemory
@@ -37,6 +38,7 @@ export type RuntimeSessionStore = {
   snapshot(): RuntimeSessionStoreSnapshot;
   summary(): ReturnType<ReturnType<typeof createStreamAccumulator>["snapshot"]>;
   overlay(): OverlayState;
+  updateOverlayBackground(background: NonNullable<OverlayState["background"]>): OverlayState;
 };
 
 function now(): string {
@@ -202,6 +204,15 @@ export function createRuntimeSessionStore(session: LiveSessionSpec): RuntimeSess
     },
 
     overlay() {
+      return overlayState;
+    },
+
+    updateOverlayBackground(background) {
+      overlayState = OverlayStateSchema.parse({
+        ...overlayState,
+        background,
+        updatedAt: now()
+      });
       return overlayState;
     }
   };

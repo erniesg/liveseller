@@ -28,6 +28,27 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isLowRiskSendReply(action) {
+  return action &&
+    typeof action.actionId === "string" &&
+    action.type === "send_reply" &&
+    action.risk === "low" &&
+    action.requiresApproval === false &&
+    action.payload?.kind === "send_reply" &&
+    typeof action.payload.text === "string" &&
+    action.payload.text.trim().length > 0;
+}
+
+function approvedCreateProductCommands(commands) {
+  return Array.isArray(commands)
+    ? commands.filter((command) =>
+        command?.kind === "create_product" &&
+        typeof command.commandId === "string" &&
+        (command.approvalStatus === "approved" || command.approvalStatus === "edited")
+      )
+    : [];
+}
+
 async function findOrCreateShopeeLiveTab() {
   const tabs = await chrome.tabs.query({ url: "https://live.shopee.sg/pc/*" });
   const existing = tabs.find((tab) => tab.url?.includes("/pc/preview")) || tabs[0];
@@ -166,6 +187,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
+  }
+
+  if (message?.type === "liveseller:execute-seller-command") {
+    if (!isLowRiskSendReply(message.action)) {
+      sendResponse({ ok: false, error: "Only low-risk no-approval send_reply actions can execute." });
+      return false;
+    }
+    chrome.storage.session.set({
+      "liveseller:lastQueuedSellerReply": {
+        actionId: message.action.actionId,
+        text: message.action.payload.text,
+        queuedAt: new Date().toISOString(),
+        source: "side-panel"
+      }
+    });
+    sendResponse({ ok: true, status: "queued_for_shopee_content_script", actionId: message.action.actionId });
+    return false;
+  }
+
+  if (message?.type === "liveseller:queue-create-products") {
+    const commands = approvedCreateProductCommands(message.commands);
+    chrome.storage.session.set({
+      "liveseller:queuedCreateProducts": {
+        commands,
+        queuedAt: new Date().toISOString(),
+        source: "side-panel"
+      }
+    });
+    sendResponse({ ok: commands.length > 0, status: "queued_for_authenticated_tab", commandCount: commands.length });
+    return false;
   }
 
   return false;

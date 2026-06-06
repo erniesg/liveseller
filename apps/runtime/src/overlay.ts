@@ -48,6 +48,11 @@ export function createInitialOverlayState(session: LiveSessionSpec): OverlayStat
       sourceVolume: 1,
       translatedVolume: 0.75
     },
+    background: {
+      mode: "default",
+      value: "default",
+      label: "Default overlay background"
+    },
     layoutWarnings: [],
     updatedAt: new Date().toISOString()
   });

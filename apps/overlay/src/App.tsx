@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import type { OverlayState } from "@liveseller/contracts";
 import { OverlayStateSchema, validLiveSessionSpec, validOverlayState } from "@liveseller/contracts";
 
@@ -94,9 +94,12 @@ export function App({ state = validOverlayState, now, connectionStatus = "fixtur
       : connectionStatus === "error"
         ? "Runtime offline"
         : "Fixture mode";
+  const backgroundStyle = state.background?.mode === "solid"
+    ? { "--liveseller-overlay-background": state.background.value } as CSSProperties
+    : undefined;
 
   return (
-    <main className="overlay-shell" aria-label="LiveSeller livestream overlay">
+    <main className="overlay-shell" style={backgroundStyle} aria-label="LiveSeller livestream overlay">
       <div className={`runtime-status runtime-status-${connectionStatus}`} aria-label="Overlay runtime status">
         <span aria-hidden="true" />
         <strong>{statusLabel}</strong>

@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import {
+  OverlayStateSchema,
   ProductReviewDecisionSchema,
   ProductReviewPlanSchema,
   RuntimeEventSchema,
@@ -112,6 +113,27 @@ export type RuntimeCompositorResult = {
   durationSeconds: number;
 };
 
+export type RuntimeCompositorStatus = {
+  state: "idle" | "running" | "stopped" | "failed";
+  overlayUrl?: string;
+  sellerPreviewUrl?: string;
+  cameraInputKind?: string;
+  cameraInput?: "present_redacted" | string;
+  rtmpUrl?: "present_redacted";
+  rtmpKey?: "present_redacted";
+  durationSeconds?: number;
+  startedAt?: string;
+  stoppedAt?: string;
+  exitCode?: number | null;
+  error?: string;
+};
+
+let activeRuntimeCompositor: {
+  child: ChildProcess;
+  streamSignature: string;
+  status: RuntimeCompositorStatus;
+} | undefined;
+
 export async function startOverlayStreamSmoke(input: {
   rtmpUrl: string;
   rtmpKey: string;
@@ -166,6 +188,26 @@ function redactCameraInput(kind: string, input: string) {
   return kind === "avfoundation" ? "present_redacted" : input;
 }
 
+export function getRuntimeCameraCompositorStatus(): RuntimeCompositorStatus {
+  return activeRuntimeCompositor?.status ?? { state: "idle" };
+}
+
+export function stopRuntimeCameraCompositor(): RuntimeCompositorStatus {
+  if (!activeRuntimeCompositor) {
+    return { state: "idle" };
+  }
+  const current = activeRuntimeCompositor;
+  const stoppedAt = new Date().toISOString();
+  current.status = {
+    ...current.status,
+    state: "stopped",
+    stoppedAt
+  };
+  activeRuntimeCompositor = undefined;
+  current.child.kill("SIGTERM");
+  return current.status;
+}
+
 export async function startRuntimeCameraCompositor(input: {
   rtmpUrl: string;
   rtmpKey: string;
@@ -183,6 +225,14 @@ export async function startRuntimeCameraCompositor(input: {
   const durationSeconds = input.durationSeconds ?? 60;
   const cameraInputKind = input.cameraInputKind ?? "lavfi";
   const cameraInput = input.cameraInput ?? "testsrc2=size=1280x720:rate=30";
+  const streamSignature = `${input.rtmpUrl}\n${input.rtmpKey}`;
+  if (activeRuntimeCompositor) {
+    throw new Error(
+      activeRuntimeCompositor.streamSignature === streamSignature
+        ? "runtime camera compositor already running for this Shopee stream key"
+        : "runtime camera compositor already running; stop it before starting another publisher"
+    );
+  }
   const child = (input.spawnImpl ?? spawn)("npm", ["run", "live:stream:runtime-compositor"], {
     cwd: new URL("../../..", import.meta.url),
     env: {
@@ -203,11 +253,36 @@ export async function startRuntimeCameraCompositor(input: {
       .replaceAll(input.rtmpUrl, "rtmp_url_present_redacted")
       .replaceAll(input.rtmpKey, "stream_key_present_redacted");
   });
+  const status: RuntimeCompositorStatus = {
+    state: "running",
+    overlayUrl: input.overlayUrl,
+    sellerPreviewUrl: input.sellerPreviewUrl,
+    cameraInputKind,
+    cameraInput: redactCameraInput(cameraInputKind, cameraInput),
+    rtmpUrl: "present_redacted",
+    rtmpKey: "present_redacted",
+    durationSeconds,
+    startedAt: new Date().toISOString()
+  };
+  activeRuntimeCompositor = {
+    child,
+    streamSignature,
+    status
+  };
 
   if (input.waitForCompletion !== false) {
     await new Promise<void>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (code) => {
+        if (activeRuntimeCompositor?.child === child) {
+          activeRuntimeCompositor.status = {
+            ...activeRuntimeCompositor.status,
+            state: code === 0 ? "stopped" : "failed",
+            stoppedAt: new Date().toISOString(),
+            exitCode: code
+          };
+          activeRuntimeCompositor = undefined;
+        }
         if (code === 0) {
           resolve();
           return;
@@ -217,6 +292,16 @@ export async function startRuntimeCameraCompositor(input: {
     });
   } else {
     child.on("close", (code) => {
+      if (activeRuntimeCompositor?.child === child) {
+        activeRuntimeCompositor.status = {
+          ...activeRuntimeCompositor.status,
+          state: code === 0 ? "stopped" : "failed",
+          stoppedAt: new Date().toISOString(),
+          exitCode: code,
+          error: code === 0 ? undefined : stderr.slice(-1200)
+        };
+        activeRuntimeCompositor = undefined;
+      }
       if (code !== 0) {
         console.error(`runtime camera compositor failed with exit ${code}: ${stderr.slice(-1200)}`);
       }
@@ -264,18 +349,24 @@ function compositorPreviewHtml(req: import("node:http").IncomingMessage) {
     main{display:grid;grid-template-rows:auto 1fr;min-height:100%;gap:12px;padding:14px}
     header{display:flex;align-items:center;justify-content:space-between;gap:12px}
     h1{font-size:16px;margin:0}
+    .controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .stage{position:relative;aspect-ratio:16/9;width:min(100%,1280px);margin:0 auto;background:#020617;overflow:hidden;border:1px solid rgba(255,255,255,.22);border-radius:8px}
     video,iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
     video{object-fit:cover}
     iframe{pointer-events:none}
-    button{border:1px solid rgba(255,255,255,.28);border-radius:6px;background:#f8fafc;color:#111827;font-weight:800;padding:8px 10px}
+    button,select{border:1px solid rgba(255,255,255,.28);border-radius:6px;background:#f8fafc;color:#111827;font-weight:800;padding:8px 10px}
+    #status{color:#cbd5e1;font-size:13px}
   </style>
 </head>
 <body>
   <main>
     <header>
       <h1>Runtime camera + public overlay preview</h1>
-      <button type="button" id="start">Start local camera</button>
+      <div class="controls">
+        <select id="device" aria-label="Camera device"></select>
+        <button type="button" id="start">Start local camera</button>
+        <span id="status">Camera idle</span>
+      </div>
     </header>
     <section class="stage" aria-label="Camera compositor preview">
       <video id="camera" muted autoplay playsinline></video>
@@ -283,10 +374,40 @@ function compositorPreviewHtml(req: import("node:http").IncomingMessage) {
     </section>
   </main>
   <script>
+    const status = document.getElementById("status");
+    const device = document.getElementById("device");
+    const video = document.getElementById("camera");
+    let currentStream;
+
+    async function refreshDevices() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter((item) => item.kind === "videoinput");
+      device.replaceChildren(...cameras.map((camera, index) => {
+        const option = document.createElement("option");
+        option.value = camera.deviceId;
+        option.textContent = camera.label || "Camera " + (index + 1);
+        return option;
+      }));
+    }
+
     document.getElementById("start").addEventListener("click", async () => {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      document.getElementById("camera").srcObject = stream;
+      try {
+        status.textContent = "Requesting camera permission";
+        currentStream?.getTracks().forEach((track) => track.stop());
+        const constraints = {
+          video: device.value ? { deviceId: { exact: device.value } } : true,
+          audio: false
+        };
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = currentStream;
+        await video.play();
+        await refreshDevices();
+        status.textContent = "Camera attached";
+      } catch (error) {
+        status.textContent = "Camera blocked: " + (error && error.message ? error.message : String(error));
+      }
     });
+    void refreshDevices().catch(() => undefined);
   </script>
 </body>
 </html>`;
@@ -382,6 +503,16 @@ export function createRuntimeServer() {
         return;
       }
 
+      if (req.method === "GET" && req.url === "/api/shopee/runtime-compositor/status") {
+        sendJson(res, 200, getRuntimeCameraCompositorStatus());
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/shopee/runtime-compositor/stop") {
+        sendJson(res, 200, stopRuntimeCameraCompositor());
+        return;
+      }
+
       if (req.method === "POST" && req.url === "/api/prep/review-decisions") {
         const body = await readJson(req);
         const reviewPlan = ProductReviewPlanSchema.parse(body.reviewPlan);
@@ -441,6 +572,20 @@ export function createRuntimeServer() {
           return;
         }
         sendJson(res, 200, store.overlay());
+        return;
+      }
+
+      const overlayBackgroundSessionId = sessionIdFromUrl(req.url, /^\/api\/overlay\/([^/]+)\/background$/u);
+      if (req.method === "POST" && overlayBackgroundSessionId) {
+        const store = sessionStores.get(overlayBackgroundSessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        const body = await readJson(req);
+        const current = store.overlay();
+        const background = OverlayStateSchema.shape.background.unwrap().parse(body.background);
+        sendJson(res, 200, store.updateOverlayBackground(background) ?? current);
         return;
       }
 

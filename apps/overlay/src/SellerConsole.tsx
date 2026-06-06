@@ -161,6 +161,7 @@ export function SellerConsole({
   const [hostLanguage, setHostLanguage] = useState<LanguageCode>("zh");
   const [viewerText, setViewerText] = useState("How much is the gold grape brooch?");
   const [viewerName, setViewerName] = useState("Test Buyer");
+  const [backgroundValue, setBackgroundValue] = useState("#0f766e");
   const [lastActions, setLastActions] = useState<RuntimeRouteResponse["actions"]>([]);
   const [lastResult, setLastResult] = useState("Ready");
   const [sellerMemory, setSellerMemory] = useState<SellerMemorySnapshot>();
@@ -309,6 +310,26 @@ export function SellerConsole({
     );
   }
 
+  async function applyBackground() {
+    const response = await fetchImpl(`${runtimeOrigin}/api/overlay/${sessionId}/background`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        background: {
+          mode: "solid",
+          value: backgroundValue,
+          label: "Seller console background"
+        }
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`Runtime background update returned ${response.status}`);
+    }
+    const nextState = OverlayStateSchema.parse(await response.json());
+    setOverlayState(nextState);
+    setLastResult("Background updated");
+  }
+
   return (
     <main className="seller-console-shell" aria-label="LiveSeller seller console">
       <header className="seller-console-header">
@@ -383,6 +404,13 @@ export function SellerConsole({
               </button>
             ))}
           </div>
+          <label>
+            Overlay background
+            <input value={backgroundValue} onChange={(event) => setBackgroundValue(event.target.value)} />
+          </label>
+          <button type="button" onClick={() => void applyBackground().catch((error) => setLastResult(error.message))}>
+            Apply background
+          </button>
         </section>
 
         <section className="seller-panel" aria-label="Viewer chat test">

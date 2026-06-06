@@ -115,7 +115,14 @@
         <div class="button-row">
           <button id="ai-prepare-shopee-preview" type="button">AI prepare Shopee Test preview</button>
           <button id="start-overlay-pipe" type="button" disabled>Start camera + overlay pipe</button>
+          <button id="refresh-camera-status" type="button">Refresh camera status</button>
+          <button id="stop-overlay-pipe" type="button">Stop camera pipe</button>
         </div>
+        <section class="inline-panel" aria-label="Camera and Shopee path">
+          <h3>Camera and Shopee path</h3>
+          <p>Use one active publisher per Shopee stream key; stop before refreshing a locked stream.</p>
+          <div id="camera-status-log" class="log">Camera compositor idle.</div>
+        </section>
         <ol id="launch-checklist" class="checklist">
           <li data-check="approved-products">Approve or edit all products.</li>
           <li data-check="create-products">Execute or dry-run create_product commands.</li>
@@ -124,6 +131,34 @@
           <li data-check="seller-preview">Verify Shopee camera/video preview and overlay feed manually.</li>
         </ol>
         <div id="livestream-log" class="log">No livestream setup command yet.</div>
+      </section>
+
+      <section class="panel" aria-label="Overlay background">
+        <div class="section-heading">
+          <div>
+            <h2>Overlay background</h2>
+            <p>Change the public overlay background through runtime state.</p>
+          </div>
+          <button id="apply-overlay-background" type="button">Apply background</button>
+        </div>
+        <div class="product-grid">
+          <label>
+            Mode
+            <select id="overlay-background-mode">
+              <option value="solid">Solid</option>
+              <option value="default">Default</option>
+            </select>
+          </label>
+          <label>
+            Value
+            <input id="overlay-background-value" value="#0f766e" />
+          </label>
+        </div>
+        <label>
+          Label
+          <input id="overlay-background-label" value="Camera test teal" />
+        </label>
+        <div id="overlay-background-log" class="log">No background change sent.</div>
       </section>
 
       <section id="liveseller-review-log" class="panel" aria-label="Runtime action review" aria-live="polite">
@@ -139,8 +174,20 @@
         <div class="button-row">
           <button id="send-viewer-message" type="button">Send viewer message</button>
           <button id="use-captured-message" type="button">Use captured Shopee message</button>
+          <button id="send-safe-reply" type="button">Send low risk reply through Shopee tab</button>
         </div>
         <div id="suggestion-log" class="stack">No viewer message captured.</div>
+      </section>
+
+      <section class="panel" aria-label="Authenticated Shopee product creation">
+        <div class="section-heading">
+          <div>
+            <h2>Shopee product creation</h2>
+            <p>Queue approved create_product commands for the authenticated seller tab with audit evidence.</p>
+          </div>
+          <button id="queue-shopee-product-creation" type="button">Queue Shopee product creation</button>
+        </div>
+        <div id="product-creation-log" class="log">No approved create_product command queued.</div>
       </section>
 
       <section class="panel" aria-label="Host captions and realtime translation">

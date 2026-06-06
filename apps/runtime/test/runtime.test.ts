@@ -24,9 +24,11 @@ import {
 import { createRuntimeSessionStore } from "../src/sessionStore";
 import {
   createRealtimeClientSecret,
+  getRuntimeCameraCompositorStatus,
   createRuntimeServer,
   startOverlayStreamSmoke,
-  startRuntimeCameraCompositor
+  startRuntimeCameraCompositor,
+  stopRuntimeCameraCompositor
 } from "../src/server";
 
 function viewerEvent(text: string, language?: LanguageCode): RuntimeEvent {
@@ -426,6 +428,99 @@ describe("live brain policy runtime", () => {
         server.close((error) => error ? reject(error) : resolve());
       });
     }
+  });
+
+  it("updates the public overlay background through the runtime server", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const origin = `http://127.0.0.1:${address.port}`;
+      const update = await fetch(`${origin}/api/overlay/${validLiveSessionSpec.sessionId}/background`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          background: {
+            mode: "solid",
+            value: "#0f766e",
+            label: "Camera test teal"
+          }
+        })
+      });
+      const updated = await update.json();
+
+      expect(update.status).toBe(200);
+      expect(updated.background).toMatchObject({
+        mode: "solid",
+        value: "#0f766e",
+        label: "Camera test teal"
+      });
+
+      const overlayResponse = await fetch(`${origin}/api/overlay/${validLiveSessionSpec.sessionId}`);
+      const overlay = await overlayResponse.json();
+      expect(overlay.background).toMatchObject({
+        mode: "solid",
+        value: "#0f766e"
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
+  it("tracks runtime camera compositor status and rejects a second publisher for the same stream key", async () => {
+    const children: EventEmitter[] = [];
+    const spawnImpl = vi.fn(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        stderr: PassThrough;
+        kill: ReturnType<typeof vi.fn>;
+        killed: boolean;
+      };
+      child.stderr = new PassThrough();
+      child.killed = false;
+      child.kill = vi.fn(() => {
+        child.killed = true;
+        child.emit("close", 0);
+        return true;
+      });
+      children.push(child);
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn;
+
+    const first = await startRuntimeCameraCompositor({
+      rtmpUrl: "rtmp://test.example/live",
+      rtmpKey: "secret-one",
+      overlayUrl: "http://127.0.0.1:5180",
+      sellerPreviewUrl: "http://127.0.0.1:8787/camera-compositor/preview",
+      waitForCompletion: false,
+      spawnImpl
+    });
+
+    expect(first.status).toBe("started_runtime_compositor_stream");
+    expect(getRuntimeCameraCompositorStatus()).toMatchObject({
+      state: "running",
+      rtmpUrl: "present_redacted",
+      rtmpKey: "present_redacted"
+    });
+
+    await expect(startRuntimeCameraCompositor({
+      rtmpUrl: "rtmp://test.example/live",
+      rtmpKey: "secret-one",
+      overlayUrl: "http://127.0.0.1:5180",
+      sellerPreviewUrl: "http://127.0.0.1:8787/camera-compositor/preview",
+      waitForCompletion: false,
+      spawnImpl
+    })).rejects.toThrow("already running");
+    expect(spawnImpl).toHaveBeenCalledTimes(1);
+
+    const stopped = stopRuntimeCameraCompositor();
+    expect(stopped).toMatchObject({ state: "stopped" });
+    expect(children[0]).toMatchObject({ killed: true });
   });
 
   it("serves the vintage jewelry session for seller UI and overlay testing", async () => {

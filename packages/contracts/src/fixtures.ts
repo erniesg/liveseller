@@ -1087,6 +1087,11 @@ export const validOverlayState: OverlayState = {
     sourceVolume: 1,
     translatedVolume: 0.75
   },
+  background: {
+    mode: "default",
+    value: "default",
+    label: "Default overlay background"
+  },
   layoutWarnings: [],
   updatedAt: now
 };

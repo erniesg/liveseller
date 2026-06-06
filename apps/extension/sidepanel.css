@@ -116,12 +116,22 @@ label {
 }
 
 .product-card,
-.suggestion-card {
+.suggestion-card,
+.inline-panel {
   border: 1px solid #d8e0ec;
   border-radius: 8px;
   display: grid;
   gap: 8px;
   padding: 10px;
+}
+
+.inline-panel h3,
+.inline-panel p {
+  margin: 0;
+}
+
+.inline-panel p {
+  color: #64748b;
 }
 
 .product-card.approved {

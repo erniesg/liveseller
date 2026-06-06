@@ -430,6 +430,13 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Copy overlay URL");
     expect(sidePanel).toContain("AI prepare Shopee Test preview");
     expect(sidePanel).toContain("Start camera + overlay pipe");
+    expect(sidePanel).toContain("Camera and Shopee path");
+    expect(sidePanel).toContain("Refresh camera status");
+    expect(sidePanel).toContain("Stop camera pipe");
+    expect(sidePanel).toContain("Overlay background");
+    expect(sidePanel).toContain("Apply background");
+    expect(sidePanel).toContain("Send low risk reply through Shopee tab");
+    expect(sidePanel).toContain("Queue Shopee product creation");
     expect(sidePanel).toContain("Verify Shopee camera/video preview and overlay feed manually.");
     expect(sidePanel).toContain('script src="sidepanel.js"');
     expect(sidePanelScript).toContain("/api/prep/review-plan/");
@@ -443,6 +450,11 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("openShopeeLiveSetup");
     expect(sidePanelScript).toContain("aiPrepareShopeePreview");
     expect(sidePanelScript).toContain("/api/shopee/runtime-compositor/start");
+    expect(sidePanelScript).toContain("/api/shopee/runtime-compositor/status");
+    expect(sidePanelScript).toContain("/api/shopee/runtime-compositor/stop");
+    expect(sidePanelScript).toContain("/api/overlay/");
+    expect(sidePanelScript).toContain("sendLowRiskReplyThroughShopeeTab");
+    expect(sidePanelScript).toContain("queueShopeeProductCreation");
     expect(sidePanelScript).toContain("updateLaunchChecklist");
     expect(sidePanelScript).toContain("present_redacted");
     expect(background).toContain("liveseller:lastViewerMessage");

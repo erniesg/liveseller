@@ -11,7 +11,9 @@ const state = {
   livestreamPrepared: false,
   overlayOpened: false,
   shopeePreview: undefined,
-  overlayPipeStarted: false
+  overlayPipeStarted: false,
+  latestCompositorStatus: undefined,
+  queuedProductCreation: []
 };
 
 let intakeImages = [];
@@ -655,6 +657,109 @@ async function startOverlayPreviewPipe() {
     sellerPreviewUrl: cameraPreviewUrl(),
     goLivePressed: false
   });
+  await refreshCameraStatus();
+}
+
+async function refreshCameraStatus() {
+  const status = await fetchJson("/api/shopee/runtime-compositor/status");
+  state.latestCompositorStatus = status;
+  state.overlayPipeStarted = status.state === "running";
+  updateLaunchChecklist();
+  writeLog("#camera-status-log", status);
+  return status;
+}
+
+async function stopOverlayPreviewPipe() {
+  const status = await fetchJson("/api/shopee/runtime-compositor/stop", {
+    method: "POST",
+    body: "{}"
+  });
+  state.latestCompositorStatus = status;
+  state.overlayPipeStarted = false;
+  updateLaunchChecklist();
+  writeLog("#camera-status-log", status);
+}
+
+async function applyOverlayBackground() {
+  const mode = $("#overlay-background-mode").value;
+  const value = $("#overlay-background-value").value.trim() || "default";
+  const label = $("#overlay-background-label").value.trim() || "Seller selected background";
+  const response = await fetchJson(`/api/overlay/${encodeURIComponent(liveSessionId())}/background`, {
+    method: "POST",
+    body: JSON.stringify({
+      background: {
+        mode,
+        value,
+        label
+      }
+    })
+  });
+  writeLog("#overlay-background-log", {
+    status: "overlay_background_updated",
+    background: response.background
+  });
+}
+
+async function sendLowRiskReplyThroughShopeeTab() {
+  const action = state.latestActions.find((candidate) =>
+    candidate.type === "send_reply" &&
+    candidate.risk === "low" &&
+    !candidate.requiresApproval &&
+    candidate.payload?.text
+  );
+  if (!action) {
+    writeLog("#suggestion-log", "No low-risk no-approval reply is available to send.");
+    return;
+  }
+  if (!globalThis.chrome?.runtime?.sendMessage) {
+    writeLog("#suggestion-log", "Chrome extension runtime is required for Shopee reply execution.");
+    return;
+  }
+  const response = await chrome.runtime.sendMessage({
+    type: "liveseller:execute-seller-command",
+    action
+  });
+  writeLog("#suggestion-log", {
+    status: response?.ok ? "shopee_reply_sent_or_queued" : "shopee_reply_not_sent",
+    actionId: action.actionId,
+    risk: action.risk,
+    requiresApproval: action.requiresApproval,
+    result: response
+  });
+}
+
+async function queueShopeeProductCreation() {
+  const approvedCommands = state.createProductCommands.filter((command) =>
+    command.kind === "create_product" &&
+    (command.approvalStatus === "approved" || command.approvalStatus === "edited")
+  );
+  if (approvedCommands.length === 0) {
+    writeLog("#product-creation-log", "No approved create_product command is available.");
+    return;
+  }
+  state.queuedProductCreation = approvedCommands.map((command) => ({
+    commandId: command.commandId,
+    productId: command.productId,
+    approvalStatus: command.approvalStatus,
+    queuedAt: new Date().toISOString()
+  }));
+  if (globalThis.chrome?.runtime?.sendMessage) {
+    const response = await chrome.runtime.sendMessage({
+      type: "liveseller:queue-create-products",
+      commands: approvedCommands
+    });
+    writeLog("#product-creation-log", {
+      status: response?.ok ? "queued_for_authenticated_shopee_tab" : "queue_recorded_side_panel_only",
+      commands: state.queuedProductCreation,
+      result: response
+    });
+    return;
+  }
+  writeLog("#product-creation-log", {
+    status: "queue_recorded_side_panel_only",
+    commands: state.queuedProductCreation,
+    note: "Chrome extension runtime is required to execute inside an authenticated Shopee seller tab."
+  });
 }
 
 async function useCapturedMessage() {
@@ -712,11 +817,16 @@ $("#execute-create-products").addEventListener("click", executeCreateProducts);
 $("#prepare-livestream").addEventListener("click", prepareLivestream);
 $("#ai-prepare-shopee-preview").addEventListener("click", () => void aiPrepareShopeePreview().catch((error) => writeLog("#livestream-log", error.message)));
 $("#start-overlay-pipe").addEventListener("click", () => void startOverlayPreviewPipe().catch((error) => writeLog("#livestream-log", error.message)));
+$("#refresh-camera-status").addEventListener("click", () => void refreshCameraStatus().catch((error) => writeLog("#camera-status-log", error.message)));
+$("#stop-overlay-pipe").addEventListener("click", () => void stopOverlayPreviewPipe().catch((error) => writeLog("#camera-status-log", error.message)));
+$("#apply-overlay-background").addEventListener("click", () => void applyOverlayBackground().catch((error) => writeLog("#overlay-background-log", error.message)));
 $("#open-public-overlay").addEventListener("click", openPublicOverlay);
 $("#open-camera-preview").addEventListener("click", openCameraPreview);
 $("#copy-public-overlay").addEventListener("click", () => void copyPublicOverlayUrl().catch((error) => writeLog("#livestream-log", error.message)));
 $("#open-shopee-live").addEventListener("click", openShopeeLiveSetup);
 $("#send-viewer-message").addEventListener("click", () => void sendViewerMessage().catch((error) => writeLog("#suggestion-log", error.message)));
+$("#send-safe-reply").addEventListener("click", () => void sendLowRiskReplyThroughShopeeTab().catch((error) => writeLog("#suggestion-log", error.message)));
+$("#queue-shopee-product-creation").addEventListener("click", () => void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message)));
 $("#send-host-caption").addEventListener("click", () => void sendHostCaption().catch((error) => writeLog("#realtime-log", error.message)));
 $("#request-realtime-session").addEventListener("click", () => void requestRealtimeSession());
 $("#use-captured-message").addEventListener("click", () => void useCapturedMessage());

@@ -1151,6 +1151,14 @@ export const OverlayStateSchema = z
         translatedVolume: z.number().min(0).max(1)
       })
       .strict(),
+    background: z
+      .object({
+        mode: z.enum(["default", "solid", "image"]),
+        value: z.string().min(1),
+        label: z.string().min(1)
+      })
+      .strict()
+      .optional(),
     layoutWarnings: z.array(z.string().min(1)),
     updatedAt: z.string().datetime()
   })
