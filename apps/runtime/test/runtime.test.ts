@@ -22,7 +22,12 @@ import {
   routeRuntimeEvent
 } from "../src/runtime";
 import { createRuntimeSessionStore } from "../src/sessionStore";
-import { createRealtimeClientSecret, createRuntimeServer, startOverlayStreamSmoke } from "../src/server";
+import {
+  createRealtimeClientSecret,
+  createRuntimeServer,
+  startOverlayStreamSmoke,
+  startRuntimeCameraCompositor
+} from "../src/server";
 
 function viewerEvent(text: string, language?: LanguageCode): RuntimeEvent {
   return {
@@ -831,5 +836,102 @@ describe("live brain policy runtime", () => {
       })
     );
     expect(JSON.stringify(result)).not.toContain("stream-key-value");
+  });
+
+  it("starts the runtime camera compositor with server-owned RTMP credentials", async () => {
+    const stderr = new PassThrough();
+    const child = new EventEmitter() as ReturnType<typeof import("node:child_process").spawn>;
+    Object.assign(child, { stderr });
+    const spawnImpl = vi.fn((_command, _args, _options) => {
+      queueMicrotask(() => child.emit("close", 0));
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn;
+
+    const result = await startRuntimeCameraCompositor({
+      rtmpUrl: "rtmp-url-value",
+      rtmpKey: "stream-key-value",
+      overlayUrl: "http://127.0.0.1:5180/?sessionId=live-seed-001",
+      sellerPreviewUrl: "http://127.0.0.1:8787/camera-compositor/preview",
+      durationSeconds: 12,
+      cameraInputKind: "avfoundation",
+      cameraInput: "0",
+      spawnImpl
+    });
+
+    expect(result).toEqual({
+      status: "sent_runtime_compositor_stream",
+      overlayUrl: "http://127.0.0.1:5180/?sessionId=live-seed-001",
+      sellerPreviewUrl: "http://127.0.0.1:8787/camera-compositor/preview",
+      cameraInputKind: "avfoundation",
+      cameraInput: "present_redacted",
+      rtmpUrl: "present_redacted",
+      rtmpKey: "present_redacted",
+      durationSeconds: 12
+    });
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "npm",
+      ["run", "live:stream:runtime-compositor"],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          LIVESELLER_CAMERA_INPUT: "0",
+          LIVESELLER_CAMERA_INPUT_KIND: "avfoundation",
+          SHOPEE_RTMP_URL: "rtmp-url-value",
+          SHOPEE_RTMP_KEY: "stream-key-value",
+          LIVESELLER_STREAM_SECONDS: "12"
+        })
+      })
+    );
+    expect(JSON.stringify(result)).not.toContain("stream-key-value");
+    expect(JSON.stringify(result)).not.toContain("rtmp-url-value");
+  });
+
+  it("returns immediately from the runtime camera compositor endpoint so the Shopee preview stays inspectable", async () => {
+    const stderr = new PassThrough();
+    const child = new EventEmitter() as ReturnType<typeof import("node:child_process").spawn>;
+    Object.assign(child, { stderr });
+    const spawnImpl = vi.fn(() => child) as unknown as typeof import("node:child_process").spawn;
+
+    const result = await startRuntimeCameraCompositor({
+      rtmpUrl: "rtmp-url-value",
+      rtmpKey: "stream-key-value",
+      overlayUrl: "http://127.0.0.1:5180/?sessionId=live-seed-001",
+      sellerPreviewUrl: "http://127.0.0.1:8787/camera-compositor/preview",
+      durationSeconds: 600,
+      spawnImpl,
+      waitForCompletion: false
+    });
+
+    expect(result.status).toBe("started_runtime_compositor_stream");
+    expect(result.durationSeconds).toBe(600);
+    expect(JSON.stringify(result)).not.toContain("stream-key-value");
+  });
+
+  it("serves a human-inspectable local camera compositor preview page", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime test server port");
+    }
+
+    try {
+      const overlayUrl = "http://127.0.0.1:5180/?sessionId=live-seed-001";
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/camera-compositor/preview?overlayUrl=${encodeURIComponent(overlayUrl)}`
+      );
+      const html = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/html");
+      expect(html).toContain("Runtime camera + public overlay preview");
+      expect(html).toContain("navigator.mediaDevices.getUserMedia");
+      expect(html).toContain(overlayUrl.replaceAll("&", "&amp;"));
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
   });
 });

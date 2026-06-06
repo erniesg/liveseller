@@ -21,7 +21,8 @@
     "demo:runtime": "npm --workspace @liveseller/runtime run demo",
     "live:prep:one-image": "tsx scripts/liveOneImageReviewSmoke.ts",
     "live:prep:one-image:raw": "npm --workspace @liveseller/prep run live:one-image",
-    "live:stream:overlay-smoke": "tsx scripts/streamOverlaySmoke.ts"
+    "live:stream:overlay-smoke": "tsx scripts/streamOverlaySmoke.ts",
+    "live:stream:runtime-compositor": "tsx scripts/streamRuntimeCompositor.ts"
   },
   "dependencies": {
     "zod": "^3.25.76"

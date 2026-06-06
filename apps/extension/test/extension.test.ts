@@ -424,10 +424,12 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("does not press Go Live");
     expect(sidePanel).toContain("Shopee Live setup URL");
     expect(sidePanel).toContain("Public overlay browser-source URL");
+    expect(sidePanel).toContain("Seller camera compositor preview URL");
     expect(sidePanel).toContain("Open Shopee Live setup");
+    expect(sidePanel).toContain("Open camera preview");
     expect(sidePanel).toContain("Copy overlay URL");
     expect(sidePanel).toContain("AI prepare Shopee Test preview");
-    expect(sidePanel).toContain("Start overlay preview pipe");
+    expect(sidePanel).toContain("Start camera + overlay pipe");
     expect(sidePanel).toContain("Verify Shopee camera/video preview and overlay feed manually.");
     expect(sidePanel).toContain('script src="sidepanel.js"');
     expect(sidePanelScript).toContain("/api/prep/review-plan/");
@@ -437,9 +439,10 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("/api/runtime/events");
     expect(sidePanelScript).toContain("/api/runtime/realtime/session");
     expect(sidePanelScript).toContain("publicOverlayUrl");
+    expect(sidePanelScript).toContain("cameraPreviewUrl");
     expect(sidePanelScript).toContain("openShopeeLiveSetup");
     expect(sidePanelScript).toContain("aiPrepareShopeePreview");
-    expect(sidePanelScript).toContain("/api/shopee/stream-overlay-smoke");
+    expect(sidePanelScript).toContain("/api/shopee/runtime-compositor/start");
     expect(sidePanelScript).toContain("updateLaunchChecklist");
     expect(sidePanelScript).toContain("present_redacted");
     expect(background).toContain("liveseller:lastViewerMessage");

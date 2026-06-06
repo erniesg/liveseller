@@ -37,9 +37,14 @@
           Public overlay browser-source URL
           <input id="public-overlay-url" readonly />
         </label>
+        <label>
+          Seller camera compositor preview URL
+          <input id="camera-preview-url" readonly />
+        </label>
         <div class="button-row">
           <button id="load-review-plan" type="button">Load review plan</button>
           <button id="open-public-overlay" type="button">Open public overlay</button>
+          <button id="open-camera-preview" type="button">Open camera preview</button>
           <button id="copy-public-overlay" type="button">Copy overlay URL</button>
           <button id="open-shopee-live" type="button">Open Shopee Live setup</button>
         </div>
@@ -109,7 +114,7 @@
         </div>
         <div class="button-row">
           <button id="ai-prepare-shopee-preview" type="button">AI prepare Shopee Test preview</button>
-          <button id="start-overlay-pipe" type="button" disabled>Start overlay preview pipe</button>
+          <button id="start-overlay-pipe" type="button" disabled>Start camera + overlay pipe</button>
         </div>
         <ol id="launch-checklist" class="checklist">
           <li data-check="approved-products">Approve or edit all products.</li>

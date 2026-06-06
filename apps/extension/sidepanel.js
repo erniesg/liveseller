@@ -32,6 +32,10 @@ function publicOverlayUrl() {
   return `http://127.0.0.1:5180/?runtimeOrigin=${encodeURIComponent(runtimeOrigin())}&sessionId=${encodeURIComponent(liveSessionId())}`;
 }
 
+function cameraPreviewUrl() {
+  return `${runtimeOrigin()}/camera-compositor/preview?overlayUrl=${encodeURIComponent(publicOverlayUrl())}`;
+}
+
 function setConnection(label, kind = "") {
   const node = $("#connection");
   node.textContent = label;
@@ -120,6 +124,7 @@ function updateLaunchChecklist() {
     node.setAttribute("aria-checked", String(complete));
   }
   $("#public-overlay-url").value = publicOverlayUrl();
+  $("#camera-preview-url").value = cameraPreviewUrl();
 }
 
 function productFromCard(card, item) {
@@ -536,6 +541,15 @@ function openPublicOverlay() {
   }
 }
 
+function openCameraPreview() {
+  const url = cameraPreviewUrl();
+  if (globalThis.chrome?.tabs) {
+    chrome.tabs.create({ url });
+  } else {
+    window.open(url, "_blank", "noopener");
+  }
+}
+
 async function copyPublicOverlayUrl() {
   $("#public-overlay-url").value = publicOverlayUrl();
   state.overlayOpened = true;
@@ -623,12 +637,13 @@ async function startOverlayPreviewPipe() {
     writeLog("#livestream-log", "Prepare Shopee Test preview first.");
     return;
   }
-  const response = await fetchJson("/api/shopee/stream-overlay-smoke", {
+  const response = await fetchJson("/api/shopee/runtime-compositor/start", {
     method: "POST",
     body: JSON.stringify({
       rtmpUrl: state.shopeePreview.rtmpUrl,
       rtmpKey: state.shopeePreview.rtmpKey,
       overlayUrl: publicOverlayUrl(),
+      sellerPreviewUrl: cameraPreviewUrl(),
       durationSeconds: 60
     })
   });
@@ -637,6 +652,7 @@ async function startOverlayPreviewPipe() {
   writeLog("#livestream-log", {
     ...response,
     previewUrl: state.shopeePreview.previewUrl,
+    sellerPreviewUrl: cameraPreviewUrl(),
     goLivePressed: false
   });
 }
@@ -697,6 +713,7 @@ $("#prepare-livestream").addEventListener("click", prepareLivestream);
 $("#ai-prepare-shopee-preview").addEventListener("click", () => void aiPrepareShopeePreview().catch((error) => writeLog("#livestream-log", error.message)));
 $("#start-overlay-pipe").addEventListener("click", () => void startOverlayPreviewPipe().catch((error) => writeLog("#livestream-log", error.message)));
 $("#open-public-overlay").addEventListener("click", openPublicOverlay);
+$("#open-camera-preview").addEventListener("click", openCameraPreview);
 $("#copy-public-overlay").addEventListener("click", () => void copyPublicOverlayUrl().catch((error) => writeLog("#livestream-log", error.message)));
 $("#open-shopee-live").addEventListener("click", openShopeeLiveSetup);
 $("#send-viewer-message").addEventListener("click", () => void sendViewerMessage().catch((error) => writeLog("#suggestion-log", error.message)));

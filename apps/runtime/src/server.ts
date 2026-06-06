@@ -101,6 +101,17 @@ export type OverlayStreamSmokeResult = {
   durationSeconds: number;
 };
 
+export type RuntimeCompositorResult = {
+  status: "started_runtime_compositor_stream" | "sent_runtime_compositor_stream";
+  overlayUrl: string;
+  sellerPreviewUrl: string;
+  cameraInputKind: string;
+  cameraInput: "present_redacted" | string;
+  rtmpUrl: "present_redacted";
+  rtmpKey: "present_redacted";
+  durationSeconds: number;
+};
+
 export async function startOverlayStreamSmoke(input: {
   rtmpUrl: string;
   rtmpKey: string;
@@ -151,6 +162,136 @@ export async function startOverlayStreamSmoke(input: {
   };
 }
 
+function redactCameraInput(kind: string, input: string) {
+  return kind === "avfoundation" ? "present_redacted" : input;
+}
+
+export async function startRuntimeCameraCompositor(input: {
+  rtmpUrl: string;
+  rtmpKey: string;
+  overlayUrl: string;
+  sellerPreviewUrl: string;
+  durationSeconds?: number;
+  cameraInputKind?: string;
+  cameraInput?: string;
+  waitForCompletion?: boolean;
+  spawnImpl?: typeof spawn;
+}): Promise<RuntimeCompositorResult> {
+  if (!input.rtmpUrl || !input.rtmpKey) {
+    throw new Error("Shopee preview RTMP URL and key are required.");
+  }
+  const durationSeconds = input.durationSeconds ?? 60;
+  const cameraInputKind = input.cameraInputKind ?? "lavfi";
+  const cameraInput = input.cameraInput ?? "testsrc2=size=1280x720:rate=30";
+  const child = (input.spawnImpl ?? spawn)("npm", ["run", "live:stream:runtime-compositor"], {
+    cwd: new URL("../../..", import.meta.url),
+    env: {
+      ...process.env,
+      LIVESELLER_CAMERA_INPUT: cameraInput,
+      LIVESELLER_CAMERA_INPUT_KIND: cameraInputKind,
+      LIVESELLER_OVERLAY_URL: input.overlayUrl,
+      LIVESELLER_STREAM_SECONDS: String(durationSeconds),
+      SHOPEE_RTMP_URL: input.rtmpUrl,
+      SHOPEE_RTMP_KEY: input.rtmpKey
+    },
+    stdio: ["ignore", "ignore", "pipe"]
+  });
+
+  let stderr = "";
+  child.stderr?.on("data", (chunk) => {
+    stderr += String(chunk)
+      .replaceAll(input.rtmpUrl, "rtmp_url_present_redacted")
+      .replaceAll(input.rtmpKey, "stream_key_present_redacted");
+  });
+
+  if (input.waitForCompletion !== false) {
+    await new Promise<void>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(new Error(`runtime camera compositor failed with exit ${code}: ${stderr.slice(-1200)}`));
+      });
+    });
+  } else {
+    child.on("close", (code) => {
+      if (code !== 0) {
+        console.error(`runtime camera compositor failed with exit ${code}: ${stderr.slice(-1200)}`);
+      }
+    });
+  }
+
+  return {
+    status: input.waitForCompletion === false
+      ? "started_runtime_compositor_stream"
+      : "sent_runtime_compositor_stream",
+    overlayUrl: input.overlayUrl,
+    sellerPreviewUrl: input.sellerPreviewUrl,
+    cameraInputKind,
+    cameraInput: redactCameraInput(cameraInputKind, cameraInput),
+    rtmpUrl: "present_redacted",
+    rtmpKey: "present_redacted",
+    durationSeconds
+  };
+}
+
+function sendHtml(res: import("node:http").ServerResponse, status: number, html: string) {
+  res.writeHead(status, {
+    "content-type": "text/html; charset=utf-8"
+  });
+  res.end(html);
+}
+
+function runtimeOrigin(req: import("node:http").IncomingMessage) {
+  return `http://${req.headers.host ?? "127.0.0.1:8787"}`;
+}
+
+function compositorPreviewHtml(req: import("node:http").IncomingMessage) {
+  const base = runtimeOrigin(req);
+  const url = new URL(req.url ?? "/camera-compositor/preview", base);
+  const overlayUrl = url.searchParams.get("overlayUrl")
+    ?? `${base.replace(":8787", ":5180")}/?runtimeOrigin=${encodeURIComponent(base)}&sessionId=${encodeURIComponent(validLiveSessionSpec.sessionId)}`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LiveSeller camera compositor preview</title>
+  <style>
+    html,body{margin:0;height:100%;background:#111827;color:#f8fafc;font-family:Inter,system-ui,sans-serif}
+    main{display:grid;grid-template-rows:auto 1fr;min-height:100%;gap:12px;padding:14px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    h1{font-size:16px;margin:0}
+    .stage{position:relative;aspect-ratio:16/9;width:min(100%,1280px);margin:0 auto;background:#020617;overflow:hidden;border:1px solid rgba(255,255,255,.22);border-radius:8px}
+    video,iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+    video{object-fit:cover}
+    iframe{pointer-events:none}
+    button{border:1px solid rgba(255,255,255,.28);border-radius:6px;background:#f8fafc;color:#111827;font-weight:800;padding:8px 10px}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Runtime camera + public overlay preview</h1>
+      <button type="button" id="start">Start local camera</button>
+    </header>
+    <section class="stage" aria-label="Camera compositor preview">
+      <video id="camera" muted autoplay playsinline></video>
+      <iframe src="${overlayUrl.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")}" title="Public overlay"></iframe>
+    </section>
+  </main>
+  <script>
+    document.getElementById("start").addEventListener("click", async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      document.getElementById("camera").srcObject = stream;
+    });
+  </script>
+</body>
+</html>`;
+}
+
 export function createRuntimeServer() {
   return createServer(async (req, res) => {
     try {
@@ -161,6 +302,11 @@ export function createRuntimeServer() {
 
       if (req.method === "GET" && req.url === "/health") {
         sendJson(res, 200, { ok: true, service: "@liveseller/runtime" });
+        return;
+      }
+
+      if (req.method === "GET" && req.url?.startsWith("/camera-compositor/preview")) {
+        sendHtml(res, 200, compositorPreviewHtml(req));
         return;
       }
 
@@ -210,6 +356,27 @@ export function createRuntimeServer() {
           rtmpKey: String(body.rtmpKey ?? ""),
           overlayUrl: String(body.overlayUrl ?? ""),
           durationSeconds: Number.isFinite(body.durationSeconds) ? Number(body.durationSeconds) : undefined
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/shopee/runtime-compositor/start") {
+        const body = await readJson(req);
+        const overlayUrl = String(body.overlayUrl ?? "");
+        const sellerPreviewUrl = String(
+          body.sellerPreviewUrl
+            ?? `${runtimeOrigin(req)}/camera-compositor/preview?overlayUrl=${encodeURIComponent(overlayUrl)}`
+        );
+        const result = await startRuntimeCameraCompositor({
+          rtmpUrl: String(body.rtmpUrl ?? ""),
+          rtmpKey: String(body.rtmpKey ?? ""),
+          overlayUrl,
+          sellerPreviewUrl,
+          durationSeconds: Number.isFinite(body.durationSeconds) ? Number(body.durationSeconds) : undefined,
+          cameraInputKind: typeof body.cameraInputKind === "string" ? body.cameraInputKind : undefined,
+          cameraInput: typeof body.cameraInput === "string" ? body.cameraInput : undefined,
+          waitForCompletion: false
         });
         sendJson(res, 200, result);
         return;
