@@ -10,41 +10,50 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <p>LiveSeller Chrome side panel</p>
-          <h1>Seller controls</h1>
+          <p>LiveSeller Shopee Copilot</p>
+          <h1 id="active-step-title">Start with products</h1>
         </div>
         <span id="connection" class="status">Runtime unknown</span>
       </header>
 
+      <nav class="step-tabs" aria-label="Seller workflow">
+        <button class="step-tab active" data-step-target="products" type="button">Start with products</button>
+        <button class="step-tab" data-step-target="live" type="button">Go live</button>
+        <button class="step-tab" data-step-target="audience" type="button">Talk to viewers</button>
+      </nav>
+
       <section class="panel config-panel" aria-label="Runtime configuration">
-        <label>
-          Runtime origin
-          <input id="runtime-origin" value="http://127.0.0.1:8787" />
-        </label>
-        <label>
-          Codex operator origin
-          <input id="operator-origin" value="http://127.0.0.1:8788" />
-        </label>
-        <label>
-          Review session
-          <input id="review-session-id" value="live-seed-001" />
-        </label>
-        <label>
-          Livestream session
-          <input id="live-session-id" value="live-seed-001" />
-        </label>
-        <label>
-          Shopee Live setup URL
-          <input id="shopee-live-url" value="https://live.shopee.sg/pc/setup?from=seller_center" />
-        </label>
-        <label>
-          Public overlay browser-source URL
-          <input id="public-overlay-url" readonly />
-        </label>
-        <label>
-          Seller camera compositor preview URL
-          <input id="camera-preview-url" readonly />
-        </label>
+        <details class="diagnostics">
+          <summary>Connection settings</summary>
+          <label>
+            Runtime origin
+            <input id="runtime-origin" value="http://127.0.0.1:8787" />
+          </label>
+          <label>
+            Codex operator origin
+            <input id="operator-origin" value="http://127.0.0.1:8788" />
+          </label>
+          <label>
+            Review session
+            <input id="review-session-id" value="live-seed-001" />
+          </label>
+          <label>
+            Livestream session
+            <input id="live-session-id" value="live-seed-001" />
+          </label>
+          <label>
+            Shopee Live setup URL
+            <input id="shopee-live-url" value="https://live.shopee.sg/pc/setup?from=seller_center" />
+          </label>
+          <label>
+            Public overlay browser-source URL
+            <input id="public-overlay-url" readonly />
+          </label>
+          <label>
+            Seller camera compositor preview URL
+            <input id="camera-preview-url" readonly />
+          </label>
+        </details>
         <div class="button-row">
           <button id="load-review-plan" type="button">Load review plan</button>
           <button id="open-public-overlay" type="button">Open public overlay</button>
@@ -54,7 +63,7 @@
         </div>
       </section>
 
-      <section id="liveseller-seller-timeline" class="panel" aria-label="Seller timeline" aria-live="polite">
+      <section id="liveseller-seller-timeline" class="panel diagnostics-panel" aria-label="Seller timeline" aria-live="polite">
         <div class="section-heading">
           <div>
             <h2>Seller timeline</h2>
@@ -65,11 +74,11 @@
         <div id="seller-timeline-log" class="stack">No timeline events loaded.</div>
       </section>
 
-      <section id="liveseller-material-intake" class="panel" aria-label="Seller material intake">
+      <section id="liveseller-material-intake" class="panel active-step" data-step="products" aria-label="Seller material intake">
         <div class="section-heading">
           <div>
-            <h2>Seller material intake</h2>
-            <p>Drop product images to create an editable review draft before publish approval.</p>
+            <h2>Add product photos</h2>
+            <p id="product-step-status">Drop images, review the plan, then approve when it is ready for Shopee.</p>
           </div>
           <span id="intake-image-count" class="tag">No images</span>
         </div>
@@ -90,13 +99,16 @@
           <button id="create-intake-review" type="button" disabled>Create review draft</button>
           <button id="clear-intake" type="button">Clear</button>
         </div>
-        <div id="intake-log" class="log">Drop images to begin.</div>
+        <details class="diagnostics">
+          <summary>Technical details</summary>
+          <div id="intake-log" class="log">Drop images to begin.</div>
+        </details>
       </section>
 
-      <section id="liveseller-prep-review" class="panel" aria-label="Seller material review" aria-live="polite">
+      <section id="liveseller-prep-review" class="panel active-step" data-step="products" aria-label="Seller material review" aria-live="polite">
         <div class="section-heading">
           <div>
-            <h2>Product review</h2>
+            <h2>Review product plan</h2>
             <p id="review-status">No review plan loaded.</p>
           </div>
           <button id="approve-all" type="button" disabled>Approve all</button>
@@ -104,38 +116,61 @@
         <div id="review-items" class="stack"></div>
       </section>
 
-      <section class="panel" aria-label="Publish commands">
+      <section class="panel active-step" data-step="products" aria-label="Publish commands">
         <div class="section-heading">
           <div>
-            <h2>Publish readiness</h2>
-            <p>Create-product and livestream setup commands appear after seller approval.</p>
+            <h2>Product creation status</h2>
+            <p>Approved products become Shopee listing actions.</p>
           </div>
-          <button id="execute-create-products" type="button" disabled>Execute create_product</button>
+          <button id="execute-create-products" type="button" disabled>Mark ready</button>
         </div>
-        <div id="command-log" class="log">No commands returned.</div>
+        <details class="diagnostics">
+          <summary>Technical details</summary>
+          <div id="command-log" class="log">No commands returned.</div>
+        </details>
       </section>
 
-      <section id="liveseller-live-control" class="panel" aria-label="Private livestream control plan">
+      <section class="panel active-step" data-step="products" aria-label="Authenticated Shopee product creation">
         <div class="section-heading">
           <div>
-            <h2>Private livestream setup</h2>
-            <p>Prepare creates the Shopee session and captures credentials as redacted presence only. It does not press Go Live.</p>
+            <h2>Publish to Shopee</h2>
+            <p>Fill the authenticated seller tab, then confirm only when the listing looks right.</p>
+          </div>
+          <button id="queue-shopee-product-creation" type="button">Fill Shopee listing</button>
+        </div>
+        <div class="button-row">
+          <button id="confirm-shopee-product-publish" type="button">Confirm Save and Publish</button>
+        </div>
+        <details class="diagnostics">
+          <summary>Technical details</summary>
+          <div id="product-creation-log" class="log">No approved create_product command queued.</div>
+        </details>
+      </section>
+
+      <section id="liveseller-live-control" class="panel" data-step="live" aria-label="Private livestream control plan">
+        <div class="section-heading">
+          <div>
+            <h2>Prepare live room</h2>
+            <p>Choose the products, preview your camera, then press Go Live when Shopee is ready.</p>
           </div>
           <button id="prepare-livestream" type="button" disabled>Prepare livestream</button>
         </div>
         <div class="button-row">
-          <button id="go-live" type="button" disabled>Go Live in Shopee Seller Centre</button>
-          <span class="warning">Manual high-risk Shopee click after explicit approval.</span>
+          <button id="go-live" type="button" disabled>Go Live</button>
         </div>
+        <section class="live-lineup" aria-label="Products selected for this live">
+          <h3>Products in this live</h3>
+          <div id="live-product-lineup" class="lineup-list">Approve products first.</div>
+        </section>
         <div class="button-row">
-          <button id="ai-prepare-shopee-preview" type="button">AI prepare Shopee Test preview</button>
-          <button id="start-overlay-pipe" type="button" disabled>Start camera + overlay pipe</button>
-          <button id="refresh-camera-status" type="button">Refresh camera status</button>
-          <button id="stop-overlay-pipe" type="button">Stop camera pipe</button>
+          <button id="ai-prepare-shopee-preview" type="button">Prepare Shopee preview</button>
+          <button id="start-overlay-pipe" type="button" disabled>Start camera preview</button>
+          <button id="refresh-camera-status" type="button">Refresh preview</button>
+          <button id="stop-overlay-pipe" type="button">Stop preview</button>
         </div>
         <section class="inline-panel" aria-label="Camera and Shopee path">
-          <h3>Camera and Shopee path</h3>
-          <p>Use one active publisher per Shopee stream key; stop before refreshing a locked stream.</p>
+          <h3>Seller-only camera preview</h3>
+          <p>Confirm the camera and overlay look right before going live.</p>
           <div id="camera-status-log" class="log">Camera compositor idle.</div>
         </section>
         <ol id="launch-checklist" class="checklist">
@@ -145,14 +180,17 @@
           <li data-check="overlay-open">Open/copy the public overlay browser-source URL.</li>
           <li data-check="seller-preview">Verify Shopee camera/video preview and overlay feed manually.</li>
         </ol>
-        <div id="livestream-log" class="log">No livestream setup command yet.</div>
+        <details class="diagnostics">
+          <summary>Technical details</summary>
+          <div id="livestream-log" class="log">No livestream setup command yet.</div>
+        </details>
       </section>
 
-      <section class="panel" aria-label="Overlay background">
+      <section class="panel" data-step="live" aria-label="Overlay background">
         <div class="section-heading">
           <div>
-            <h2>Overlay background</h2>
-            <p>Change the public overlay background through runtime state.</p>
+            <h2>Overlay look</h2>
+            <p>Change or reuse the stream background while the live preview is running.</p>
           </div>
           <button id="apply-overlay-background" type="button">Apply background</button>
         </div>
@@ -173,11 +211,15 @@
           Label
           <input id="overlay-background-label" value="Camera test teal" />
         </label>
-        <div id="overlay-background-log" class="log">No background change sent.</div>
+        <details class="diagnostics">
+          <summary>Technical details</summary>
+          <div id="overlay-background-log" class="log">No background change sent.</div>
+        </details>
       </section>
 
-      <section id="liveseller-review-log" class="panel" aria-label="Runtime action review" aria-live="polite">
-        <h2>Viewer messages and seller-only suggestions</h2>
+      <section id="liveseller-review-log" class="panel" data-step="audience" aria-label="Runtime action review" aria-live="polite">
+        <h2>Viewer messages</h2>
+        <p class="seller-copy">Captured viewer messages become policy-checked replies. Safe replies can be sent; risky ones stay seller-only.</p>
         <label>
           Viewer name
           <input id="viewer-name" value="Test Buyer" />
@@ -187,35 +229,20 @@
           <input id="viewer-message" value="How much is the Bamboo Cooling Tee?" />
         </label>
         <div class="button-row">
-          <button id="send-viewer-message" type="button">Send viewer message</button>
+          <button id="send-viewer-message" type="button">Test viewer message</button>
           <button id="use-captured-message" type="button">Use captured Shopee message</button>
-          <button id="send-safe-reply" type="button">Send low risk reply through Shopee tab</button>
+          <button id="send-safe-reply" type="button">Send safe reply</button>
         </div>
         <div id="suggestion-log" class="stack">No viewer message captured.</div>
       </section>
 
-      <section class="panel" aria-label="Authenticated Shopee product creation">
+      <section class="panel" data-step="audience" aria-label="Host captions and realtime translation">
         <div class="section-heading">
           <div>
-            <h2>Shopee product creation</h2>
-            <p>Queue approved create_product commands for the authenticated seller tab with audit evidence.</p>
+            <h2>Voice copilot</h2>
+            <p>Listen for voice commands, translate speech, and update seller-only prompts.</p>
           </div>
-          <button id="queue-shopee-product-creation" type="button">Queue Shopee product creation</button>
-        </div>
-        <div class="button-row">
-          <button id="confirm-shopee-product-publish" type="button">Confirm Save and Publish</button>
-          <span class="warning">Explicit seller click; fills approved fields again, then presses Shopee Save and Publish if available.</span>
-        </div>
-        <div id="product-creation-log" class="log">No approved create_product command queued.</div>
-      </section>
-
-      <section class="panel" aria-label="Host captions and realtime translation">
-        <div class="section-heading">
-          <div>
-            <h2>Host voice and overlays</h2>
-            <p>Send host captions to public overlay; realtime voice uses a server-minted ephemeral client secret.</p>
-          </div>
-          <button id="request-realtime-session" type="button">Start realtime agent</button>
+          <button id="request-realtime-session" type="button">Start voice copilot</button>
         </div>
         <label>
           Host caption
@@ -231,24 +258,27 @@
           </select>
         </label>
         <div class="button-row">
-          <button id="send-host-caption" type="button">Send caption to overlay</button>
-          <button id="start-realtime-agent" type="button">Start realtime agent</button>
+          <button id="send-host-caption" type="button">Send translated caption</button>
+          <button id="start-realtime-agent" type="button">Connect microphone</button>
         </div>
-        <div id="realtime-log" class="log">OpenAI RealtimeAgent not started.</div>
+        <details class="diagnostics">
+          <summary>Technical details</summary>
+          <div id="realtime-log" class="log">OpenAI RealtimeAgent not started.</div>
+        </details>
       </section>
 
-      <section class="panel" aria-label="Product script suggestion">
+      <section class="panel" data-step="audience" aria-label="Product script suggestion">
         <div class="section-heading">
           <div>
-            <h2>Product script suggestion</h2>
-            <p>Seller-only talk tracks built from structured product facts.</p>
+            <h2>What to say next</h2>
+            <p>Seller-only scripts built from the approved product facts.</p>
           </div>
           <button id="load-product-scripts" type="button">Load scripts</button>
         </div>
         <div id="script-suggestion-log" class="stack">No script loaded.</div>
       </section>
 
-      <section id="liveseller-codex-operator" class="panel" aria-label="Codex operator events" aria-live="polite">
+      <section id="liveseller-codex-operator" class="panel diagnostics-panel" aria-label="Codex operator events" aria-live="polite">
         <div class="section-heading">
           <div>
             <h2>Codex app-server operator</h2>

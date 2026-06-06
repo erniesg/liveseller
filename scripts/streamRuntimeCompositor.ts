@@ -9,8 +9,9 @@ const overlayUrl = process.env.LIVESELLER_OVERLAY_URL
 const rtmpUrl = process.env.SHOPEE_RTMP_URL;
 const rtmpKey = process.env.SHOPEE_RTMP_KEY;
 const durationSeconds = Number.parseInt(process.env.LIVESELLER_STREAM_SECONDS ?? "60", 10);
-const cameraInputKind = process.env.LIVESELLER_CAMERA_INPUT_KIND ?? "lavfi";
-const cameraInput = process.env.LIVESELLER_CAMERA_INPUT ?? "testsrc2=size=1280x720:rate=30";
+const cameraInputKind = process.env.LIVESELLER_CAMERA_INPUT_KIND ?? "avfoundation";
+const cameraInput = process.env.LIVESELLER_CAMERA_INPUT
+  ?? (cameraInputKind === "avfoundation" ? "0" : "testsrc2=size=1280x720:rate=30");
 const outputWidth = Number.parseInt(process.env.LIVESELLER_STREAM_WIDTH ?? "720", 10);
 const outputHeight = Number.parseInt(process.env.LIVESELLER_STREAM_HEIGHT ?? "1280", 10);
 const outputOrientation = process.env.LIVESELLER_STREAM_ORIENTATION ?? "vertical";

@@ -23,6 +23,23 @@ const state = {
 
 let intakeImages = [];
 
+const stepTitles = {
+  products: "Start with products",
+  live: "Go live",
+  audience: "Talk to viewers"
+};
+
+function setActiveStep(step) {
+  const activeStep = stepTitles[step] ? step : "products";
+  $("#active-step-title").textContent = stepTitles[activeStep];
+  document.querySelectorAll("[data-step]").forEach((section) => {
+    section.classList.toggle("active-step", section.getAttribute("data-step") === activeStep);
+  });
+  document.querySelectorAll("[data-step-target]").forEach((button) => {
+    button.classList.toggle("active", button.getAttribute("data-step-target") === activeStep);
+  });
+}
+
 function runtimeOrigin() {
   return $("#runtime-origin").value.trim().replace(/\/$/u, "") || "http://127.0.0.1:8787";
 }
@@ -196,6 +213,39 @@ function allProductsApproved() {
   );
 }
 
+function publishableItems() {
+  return currentItems().filter((item) =>
+    item.decision.status === "approved" || item.decision.status === "edited"
+  );
+}
+
+function renderLiveLineup() {
+  const root = $("#live-product-lineup");
+  if (!root) {
+    return;
+  }
+  const items = publishableItems();
+  root.replaceChildren();
+  if (items.length === 0) {
+    root.textContent = "Approve products first.";
+    return;
+  }
+  for (const item of items) {
+    const product = item.decision.editedProduct || item.product;
+    const image = product.media?.images?.[0];
+    const row = document.createElement("article");
+    row.className = "lineup-item";
+    row.innerHTML = `
+      ${image ? `<img src="${escapeHtml(image.uri)}" alt="${escapeHtml(image.alt || product.title)}" />` : "<span></span>"}
+      <div>
+        <strong>${escapeHtml(product.title)}</strong>
+        <span>${escapeHtml(product.currency)} ${Number(product.price).toFixed(2)} · ${escapeHtml(product.stock)} in stock</span>
+      </div>
+    `;
+    root.append(row);
+  }
+}
+
 function updateLaunchChecklist() {
   const checks = {
     "approved-products": allProductsApproved(),
@@ -215,6 +265,7 @@ function updateLaunchChecklist() {
   $("#public-overlay-url").value = publicOverlayUrl();
   $("#camera-preview-url").value = cameraPreviewUrl();
   $("#go-live").disabled = !state.shopeePreview?.goLiveVisible;
+  renderLiveLineup();
 }
 
 function productFromCard(card, item) {
@@ -378,9 +429,11 @@ function addIntakeFiles(files) {
   })));
   fillIntakeDraft();
   renderIntake();
+  $("#product-step-status").textContent = "Images ready. Create a review draft to prepare the product plan.";
 }
 
 function createIntakeReviewDraft() {
+  $("#product-step-status").textContent = "Processing product photos into a reviewable plan...";
   const now = new Date().toISOString();
   const productId = `sidepanel-${Date.now()}`;
   const product = {
@@ -465,12 +518,14 @@ function createIntakeReviewDraft() {
   state.startLivestreamCommands = [];
   renderReviewPlan();
   renderCommands();
+  renderLiveLineup();
   writeLog("#intake-log", {
-    status: "review_draft_created",
+    status: "Draft ready for review",
     productId,
     imageCount: intakeImages.length,
-    note: "Draft is local to the side panel until seller approval/publish integration."
+    note: "Approve the plan to queue a Shopee product creation action."
   });
+  $("#product-step-status").textContent = "Draft ready for review. Edit details or approve to create the Shopee listing.";
 }
 
 function clearIntake() {
@@ -516,6 +571,7 @@ async function loadReviewPlan() {
   state.livestreamPrepared = false;
   renderReviewPlan();
   renderCommands();
+  renderLiveLineup();
 }
 
 async function submitDecision(card, item, status) {
@@ -956,6 +1012,8 @@ async function startOverlayPreviewPipe() {
       rtmpKey: state.shopeePreview.rtmpKey,
       overlayUrl: publicOverlayUrl(),
       sellerPreviewUrl: cameraPreviewUrl(),
+      cameraInputKind: "avfoundation",
+      cameraInput: "0",
       durationSeconds: 60
     })
   });
@@ -1272,8 +1330,13 @@ $("#refresh-seller-timeline").addEventListener("click", () => void refreshSeller
 $("#request-codex-operator").addEventListener("click", () => void requestCodexOperator().catch((error) => writeLog("#operator-result-log", error.message)));
 $("#operator-generate-images").addEventListener("click", () => void operatorGenerateImages().catch((error) => writeLog("#operator-result-log", error.message)));
 $("#operator-build-create-products").addEventListener("click", () => void operatorBuildCreateProducts().catch((error) => writeLog("#operator-result-log", error.message)));
+document.querySelectorAll("[data-step-target]").forEach((button) => {
+  button.addEventListener("click", () => setActiveStep(button.getAttribute("data-step-target")));
+});
 
 void checkRuntime().catch(() => undefined);
+setInterval(() => void checkRuntime().catch(() => undefined), 5000);
 void refreshSellerTimeline().catch(() => undefined);
 renderIntake();
 updateLaunchChecklist();
+setActiveStep("products");

@@ -507,9 +507,9 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Drag product images here");
     expect(sidePanel).toContain("Create review draft");
     expect(sidePanel).toContain('id="liveseller-live-control"');
-    expect(sidePanel).toContain("Prepare livestream");
-    expect(sidePanel).toContain("Go Live in Shopee Seller Centre");
-    expect(sidePanel).toContain("does not press Go Live");
+    expect(sidePanel).toContain("Prepare live room");
+    expect(sidePanel).toContain("Products in this live");
+    expect(sidePanel).toContain("Go Live");
     expect(sidePanel).toContain("Shopee Live setup URL");
     expect(sidePanel).toContain("Codex operator origin");
     expect(sidePanel).toContain('id="liveseller-seller-timeline"');
@@ -520,19 +520,19 @@ describe("Shopee extension command safety", () => {
     expect(sidePanel).toContain("Open Shopee Live setup");
     expect(sidePanel).toContain("Open camera preview");
     expect(sidePanel).toContain("Copy overlay URL");
-    expect(sidePanel).toContain("AI prepare Shopee Test preview");
-    expect(sidePanel).toContain("Start camera + overlay pipe");
-    expect(sidePanel).toContain("Camera and Shopee path");
-    expect(sidePanel).toContain("Refresh camera status");
-    expect(sidePanel).toContain("Stop camera pipe");
-    expect(sidePanel).toContain("Overlay background");
+    expect(sidePanel).toContain("Prepare Shopee preview");
+    expect(sidePanel).toContain("Start camera preview");
+    expect(sidePanel).toContain("Seller-only camera preview");
+    expect(sidePanel).toContain("Refresh preview");
+    expect(sidePanel).toContain("Stop preview");
+    expect(sidePanel).toContain("Overlay look");
     expect(sidePanel).toContain("Apply background");
-    expect(sidePanel).toContain("Send low risk reply through Shopee tab");
-    expect(sidePanel).toContain("Queue Shopee product creation");
+    expect(sidePanel).toContain("Send safe reply");
+    expect(sidePanel).toContain("Fill Shopee listing");
     expect(sidePanel).toContain("Confirm Save and Publish");
-    expect(sidePanel).toContain("Product script suggestion");
+    expect(sidePanel).toContain("What to say next");
     expect(sidePanel).toContain("Load scripts");
-    expect(sidePanel).toContain("Start realtime agent");
+    expect(sidePanel).toContain("Start voice copilot");
     expect(sidePanel).toContain("Codex app-server operator");
     expect(sidePanel).toContain("Ask operator");
     expect(sidePanel).toContain("Generate image edits");
@@ -564,6 +564,8 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("openShopeeLiveSetup");
     expect(sidePanelScript).toContain("aiPrepareShopeePreview");
     expect(sidePanelScript).toContain("/api/shopee/runtime-compositor/start");
+    expect(sidePanelScript).toContain('cameraInputKind: "avfoundation"');
+    expect(sidePanelScript).toContain('cameraInput: "0"');
     expect(sidePanelScript).toContain("/api/shopee/runtime-compositor/status");
     expect(sidePanelScript).toContain("/api/shopee/runtime-compositor/stop");
     expect(sidePanelScript).toContain("/api/overlay/");
@@ -582,5 +584,25 @@ describe("Shopee extension command safety", () => {
     expect(background).toContain("liveseller:confirm-go-live");
     expect(contentScript).toContain("data-viewer-id");
     expect(`${sidePanel}\n${sidePanelScript}\n${background}\n${contentScript}`).not.toMatch(/OPENAI_API_KEY|sk-/i);
+  });
+
+  it("presents a seller-facing step flow and hides diagnostics by default", () => {
+    const sidePanel = readFileSync(join(repoRoot, "apps/extension/sidepanel.html"), "utf8");
+    const sidePanelScript = readFileSync(join(repoRoot, "apps/extension/sidepanel.js"), "utf8");
+    const sidePanelStyles = readFileSync(join(repoRoot, "apps/extension/sidepanel.css"), "utf8");
+
+    expect(sidePanel).toContain("Start with products");
+    expect(sidePanel).toContain("Go live");
+    expect(sidePanel).toContain("Talk to viewers");
+    expect(sidePanel).toContain('data-step="products"');
+    expect(sidePanel).toContain('data-step="live"');
+    expect(sidePanel).toContain('data-step="audience"');
+    expect(sidePanel).toContain("Connection settings");
+    expect(sidePanel).toContain("Technical details");
+    expect(sidePanelScript).toContain("setActiveStep");
+    expect(sidePanelScript).toContain("Draft ready for review");
+    expect(sidePanelStyles).toContain(".panel[data-step]");
+    expect(sidePanelStyles).toContain(".panel[data-step].active-step");
+    expect(sidePanelStyles).toContain("details.diagnostics");
   });
 });

@@ -412,8 +412,8 @@ export async function startRuntimeCameraCompositor(input: {
     throw new Error("Shopee preview RTMP URL and key are required.");
   }
   const durationSeconds = input.durationSeconds ?? 60;
-  const cameraInputKind = input.cameraInputKind ?? "lavfi";
-  const cameraInput = input.cameraInput ?? "testsrc2=size=1280x720:rate=30";
+  const cameraInputKind = input.cameraInputKind ?? "avfoundation";
+  const cameraInput = input.cameraInput ?? (cameraInputKind === "avfoundation" ? "0" : "testsrc2=size=1280x720:rate=30");
   const outputOrientation = "vertical";
   const outputSize = "720x1280";
   const streamSignature = `${input.rtmpUrl}\n${input.rtmpKey}`;
@@ -576,8 +576,8 @@ function compositorPreviewHtml(req: import("node:http").IncomingMessage) {
     .controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .stage{position:relative;aspect-ratio:16/9;width:min(100%,1280px);margin:0 auto;background:#020617;overflow:hidden;border:1px solid rgba(255,255,255,.22);border-radius:8px}
     video,iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
-    video{object-fit:cover}
-    iframe{pointer-events:none}
+    video{object-fit:cover;z-index:1}
+    iframe{pointer-events:none;z-index:2;background:transparent;opacity:.88}
     button,select{border:1px solid rgba(255,255,255,.28);border-radius:6px;background:#f8fafc;color:#111827;font-weight:800;padding:8px 10px}
     #status{color:#cbd5e1;font-size:13px}
   </style>
@@ -589,12 +589,12 @@ function compositorPreviewHtml(req: import("node:http").IncomingMessage) {
       <div class="controls">
         <select id="device" aria-label="Camera device"></select>
         <button type="button" id="start">Start local camera</button>
-        <span id="status">Camera idle</span>
+        <span id="status" aria-live="polite">Camera idle</span>
       </div>
     </header>
     <section class="stage" aria-label="Camera compositor preview">
-      <video id="camera" muted autoplay playsinline></video>
-      <iframe src="${overlayUrl.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")}" title="Public overlay"></iframe>
+      <video id="camera" data-layer="camera-primary" muted autoplay playsinline></video>
+      <iframe data-layer="overlay-top" src="${overlayUrl.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")}" title="Public overlay"></iframe>
     </section>
   </main>
   <script>
@@ -602,6 +602,14 @@ function compositorPreviewHtml(req: import("node:http").IncomingMessage) {
     const device = document.getElementById("device");
     const video = document.getElementById("camera");
     let currentStream;
+
+    function reportCameraStatus(prefix) {
+      const width = video.videoWidth || 0;
+      const height = video.videoHeight || 0;
+      status.textContent = width && height
+        ? prefix + " " + width + "x" + height + " (live)"
+        : prefix + " (waiting for dimensions)";
+    }
 
     async function refreshDevices() {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -614,7 +622,7 @@ function compositorPreviewHtml(req: import("node:http").IncomingMessage) {
       }));
     }
 
-    document.getElementById("start").addEventListener("click", async () => {
+    async function startCamera() {
       try {
         status.textContent = "Requesting camera permission";
         currentStream?.getTracks().forEach((track) => track.stop());
@@ -626,12 +634,20 @@ function compositorPreviewHtml(req: import("node:http").IncomingMessage) {
         video.srcObject = currentStream;
         await video.play();
         await refreshDevices();
-        status.textContent = "Camera attached";
+        reportCameraStatus("Camera attached");
       } catch (error) {
         status.textContent = "Camera blocked: " + (error && error.message ? error.message : String(error));
       }
-    });
-    void refreshDevices().catch(() => undefined);
+    }
+
+    video.addEventListener("loadedmetadata", () => reportCameraStatus("Camera attached"));
+    video.addEventListener("resize", () => reportCameraStatus("Camera attached"));
+    document.getElementById("start").addEventListener("click", startCamera);
+    void refreshDevices()
+      .then(() => startCamera())
+      .catch((error) => {
+        status.textContent = "Camera unavailable: " + (error && error.message ? error.message : String(error));
+      });
   </script>
 </body>
 </html>`;

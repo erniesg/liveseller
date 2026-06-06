@@ -1191,6 +1191,41 @@ describe("live brain policy runtime", () => {
     expect(JSON.stringify(result)).not.toContain("rtmp-url-value");
   });
 
+  it("defaults the runtime camera compositor source to Mac camera device 0", async () => {
+    const stderr = new PassThrough();
+    const child = new EventEmitter() as ReturnType<typeof import("node:child_process").spawn>;
+    Object.assign(child, { stderr });
+    const spawnImpl = vi.fn((_command, _args, _options) => {
+      queueMicrotask(() => child.emit("close", 0));
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn;
+
+    const result = await startRuntimeCameraCompositor({
+      rtmpUrl: "rtmp-url-value",
+      rtmpKey: "stream-key-value",
+      overlayUrl: "http://127.0.0.1:5180/?sessionId=live-seed-001",
+      sellerPreviewUrl: "http://127.0.0.1:8787/camera-compositor/preview",
+      spawnImpl
+    });
+
+    expect(result).toMatchObject({
+      cameraInputKind: "avfoundation",
+      cameraInput: "present_redacted"
+    });
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "npm",
+      ["run", "live:stream:runtime-compositor"],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          LIVESELLER_CAMERA_INPUT: "0",
+          LIVESELLER_CAMERA_INPUT_KIND: "avfoundation"
+        })
+      })
+    );
+    expect(JSON.stringify(result)).not.toContain("\"cameraInput\":\"0\"");
+    expect(JSON.stringify(result)).not.toContain("stream-key-value");
+  });
+
   it("returns immediately from the runtime camera compositor endpoint so the Shopee preview stays inspectable", async () => {
     const stderr = new PassThrough();
     const child = new EventEmitter() as ReturnType<typeof import("node:child_process").spawn>;
@@ -1233,6 +1268,10 @@ describe("live brain policy runtime", () => {
       expect(response.headers.get("content-type")).toContain("text/html");
       expect(html).toContain("Runtime camera + public overlay preview");
       expect(html).toContain("navigator.mediaDevices.getUserMedia");
+      expect(html).toContain("data-layer=\"camera-primary\"");
+      expect(html).toContain("loadedmetadata");
+      expect(html).toContain("video.videoWidth");
+      expect(html).toContain("prefix + \" \" + width + \"x\" + height + \" (live)\"");
       expect(html).toContain(overlayUrl.replaceAll("&", "&amp;"));
     } finally {
       await new Promise<void>((resolve, reject) => {
