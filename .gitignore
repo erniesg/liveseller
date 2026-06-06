@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.vite/
+.npm-cache/
+coverage/
+*.log
+.DS_Store
+data/*.sqlite
+audit/*.jsonl

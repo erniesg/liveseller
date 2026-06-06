@@ -1,0 +1,2 @@
+promo_id,title,type,value,min_spend,eligible_skus,remaining_quantity,source
+promo-flash-10,Live Flash 10% Off,percentage,10,20,"LS-TEE-001|LS-BAG-002|LS-BOTTLE-003",50,seller_note

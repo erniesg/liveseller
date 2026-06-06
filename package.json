@@ -1,0 +1,38 @@
+{
+  "name": "liveseller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev:overlay": "npm --workspace @liveseller/overlay run dev",
+    "dev:runtime": "npm --workspace @liveseller/runtime run dev",
+    "demo:prep": "npm --workspace @liveseller/prep run demo",
+    "demo:runtime": "npm --workspace @liveseller/runtime run demo"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "jsdom": "^27.2.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4",
+    "vitest": "^4.0.15"
+  }
+}

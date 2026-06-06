@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "LiveSeller Shopee Copilot",
+  "version": "0.1.0",
+  "description": "Observes an authenticated seller tab and executes approved LiveSeller commands.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.shopee.sg/*",
+    "https://*.shopee.com.my/*",
+    "https://*.shopee.co.id/*",
+    "https://*.shopee.ph/*",
+    "https://*.shopee.co.th/*",
+    "https://*.shopee.vn/*"
+  ],
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.shopee.sg/*",
+        "https://*.shopee.com.my/*",
+        "https://*.shopee.co.id/*",
+        "https://*.shopee.ph/*",
+        "https://*.shopee.co.th/*",
+        "https://*.shopee.vn/*"
+      ],
+      "js": [
+        "dist/contentScript.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Travel cable pouch">
+  <rect width="320" height="320" fill="#bfdbfe"/>
+  <rect x="56" y="94" width="208" height="146" rx="20" fill="#475569"/>
+  <path d="M72 134h176" stroke="#e2e8f0" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="120" cy="184" r="22" fill="#14b8a6"/>
+  <path d="M150 184c44-42 72 36 28 18" fill="none" stroke="#f8fafc" stroke-width="10" stroke-linecap="round"/>
+</svg>

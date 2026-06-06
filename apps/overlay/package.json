@@ -1,0 +1,25 @@
+{
+  "name": "@liveseller/overlay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run apps/overlay/test"
+  },
+  "dependencies": {
+    "@liveseller/contracts": "0.1.0",
+    "@vitejs/plugin-react": "^5.1.1",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "vite": "^7.2.4"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "jsdom": "^27.2.0",
+    "vitest": "^4.0.15"
+  }
+}
