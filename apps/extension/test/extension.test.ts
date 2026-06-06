@@ -363,7 +363,8 @@ describe("Shopee extension command safety", () => {
               item.productId === productId ? { ...item, decision } : item
             )
           },
-          createProductCommands: [validShopeeCreateProductCommand]
+          createProductCommands: [validShopeeCreateProductCommand],
+          startLivestreamCommands: [validShopeeStartLivestreamCommand]
         }),
         {
           status: 200,
@@ -381,6 +382,20 @@ describe("Shopee extension command safety", () => {
     expect(result.runtimeResponse.createProductCommands).toHaveLength(1);
     expect(result.executedProductCommands[0]?.toolResult.status).toBe("applied");
     expect(result.executedProductCommands[0]?.command?.kind).toBe("create_product");
+    expect(result.runtimeResponse.startLivestreamCommands).toHaveLength(1);
+    expect(result.executedLivestreamCommands[0]?.toolResult.status).toBe("applied");
+    expect(result.executedLivestreamCommands[0]?.command?.kind).toBe("prepare_livestream");
+    expect(result.executedLivestreamCommands[0]?.setupEvidence).toMatchObject({
+      liveSessionCreated: true,
+      credentialEvidence: {
+        serverUrl: "present_redacted",
+        secretToken: "present_redacted"
+      },
+      publicOverlayReady: true,
+      goLivePressed: false
+    });
+    expect(JSON.stringify(result).toLowerCase()).not.toContain("streamkey");
+    expect(JSON.stringify(result).toLowerCase()).not.toContain("rtmp://");
   });
 
   it("keeps OpenAI keys out of extension manifest", () => {

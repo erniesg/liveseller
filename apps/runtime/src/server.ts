@@ -8,6 +8,7 @@ import {
 } from "@liveseller/contracts";
 import {
   buildShopeeCreateProductCommands,
+  buildShopeeStartLivestreamCommands,
   recordProductReviewDecision
 } from "./approvals";
 import { createRuntimeSessionStore } from "./sessionStore";
@@ -83,9 +84,14 @@ export function createRuntimeServer() {
         const decision = ProductReviewDecisionSchema.parse(body.decision);
         const updatedReviewPlan = recordProductReviewDecision(reviewPlan, decision);
         const createProductCommands = buildShopeeCreateProductCommands(updatedReviewPlan);
+        const store = sessionStores.get(updatedReviewPlan.sessionId);
+        const startLivestreamCommands = store
+          ? buildShopeeStartLivestreamCommands(updatedReviewPlan, store.snapshot().session)
+          : [];
         sendJson(res, 200, {
           reviewPlan: updatedReviewPlan,
-          createProductCommands
+          createProductCommands,
+          startLivestreamCommands
         });
         return;
       }

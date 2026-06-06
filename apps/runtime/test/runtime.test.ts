@@ -10,6 +10,7 @@ import {
 } from "@liveseller/contracts";
 import {
   buildShopeeCreateProductCommands,
+  buildShopeeStartLivestreamCommands,
   recordSellerReviewResponse,
   recordProductReviewDecision
 } from "../src/approvals";
@@ -171,6 +172,51 @@ describe("live brain policy runtime", () => {
     });
 
     expect(buildShopeeCreateProductCommands(rejectedPlan)).toEqual([]);
+  });
+
+  it("generates dry-run livestream setup commands only after every product is publishable", () => {
+    const partiallyApproved = recordProductReviewDecision(validProductReviewPlan, {
+      decisionId: "decision-prod-cooling-tee-approved-live-setup",
+      productId: validProductReviewPlan.items[0]!.productId,
+      status: "approved",
+      decidedBy: "seller",
+      decidedAt: "2026-06-06T02:35:00.000Z",
+      reason: "Seller approved one product.",
+      citations: validProductReviewPlan.items[0]!.product.evidence
+    });
+
+    expect(buildShopeeStartLivestreamCommands(partiallyApproved, validLiveSessionSpec)).toEqual([]);
+
+    const readyPlan = validProductReviewPlan.items.reduce((plan, item, index) =>
+      recordProductReviewDecision(plan, {
+        decisionId: `decision-${item.productId}-approved-live-setup-${index}`,
+        productId: item.productId,
+        status: "approved",
+        decidedBy: "seller",
+        decidedAt: `2026-06-06T02:4${index}:00.000Z`,
+        reason: "Seller approved product for livestream setup.",
+        citations: item.product.evidence
+      }), validProductReviewPlan);
+    const commands = buildShopeeStartLivestreamCommands(
+      readyPlan,
+      validLiveSessionSpec,
+      "2026-06-06T02:45:00.000Z"
+    );
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({
+      kind: "prepare_livestream",
+      sessionId: validLiveSessionSpec.sessionId,
+      safetyMode: "create_session_capture_credentials",
+      payload: {
+        productIds: validProductReviewPlan.items.map((item) => item.productId),
+        streamCredentialHandling: "transient_capture_redacted_evidence",
+        credentialEvidence: "redacted_presence_only",
+        goLive: false
+      }
+    });
+    expect(JSON.stringify(commands).toLowerCase()).not.toContain("streamkey");
+    expect(JSON.stringify(commands).toLowerCase()).not.toContain("rtmp://");
   });
 
   it("records free-form seller review feedback and proposes another option round", () => {
@@ -596,6 +642,68 @@ describe("live brain policy runtime", () => {
         productId: "prod-cooling-tee",
         approvalDecisionId: "decision-prod-cooling-tee-approved-http"
       });
+      expect(body.startLivestreamCommands).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
+  it("returns a redacted prepare-livestream command over HTTP for fully approved review plans", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const baseReadyPlan = validProductReviewPlan.items.slice(1).reduce((plan, item, index) =>
+        recordProductReviewDecision(plan, {
+          decisionId: `decision-${item.productId}-approved-http-live-${index}`,
+          productId: item.productId,
+          status: "approved",
+          decidedBy: "seller",
+          decidedAt: `2026-06-06T02:4${index}:00.000Z`,
+          reason: "Seller approved product for HTTP livestream setup.",
+          citations: item.product.evidence
+        }), validProductReviewPlan);
+      const finalItem = validProductReviewPlan.items[0]!;
+      const finalDecision = {
+        decisionId: "decision-prod-cooling-tee-approved-http-live-final",
+        productId: finalItem.productId,
+        status: "approved" as const,
+        decidedBy: "seller" as const,
+        decidedAt: "2026-06-06T02:45:00.000Z",
+        reason: "Seller approved final product from extension side panel.",
+        citations: finalItem.product.evidence
+      };
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/prep/review-decisions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reviewPlan: baseReadyPlan,
+          decision: finalDecision
+        })
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.reviewPlan.status).toBe("ready_for_publish");
+      expect(body.createProductCommands).toHaveLength(validProductReviewPlan.items.length);
+      expect(body.startLivestreamCommands).toHaveLength(1);
+      expect(body.startLivestreamCommands[0]).toMatchObject({
+        kind: "prepare_livestream",
+        sessionId: validLiveSessionSpec.sessionId,
+        payload: {
+          streamCredentialHandling: "transient_capture_redacted_evidence",
+          credentialEvidence: "redacted_presence_only",
+          goLive: false
+        }
+      });
+      expect(JSON.stringify(body).toLowerCase()).not.toContain("streamkey");
+      expect(JSON.stringify(body).toLowerCase()).not.toContain("rtmp://");
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());

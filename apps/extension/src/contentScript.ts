@@ -5,21 +5,25 @@ import {
   type ProductReviewPlan,
   type RuntimeEvent,
   type ShopeeCreateProductCommand,
+  type ShopeeStartLivestreamCommand,
   type ToolResult,
   AuditEventSchema,
   LiveActionSchema,
   ProductReviewDecisionSchema,
   ProductReviewPlanSchema,
   ShopeeCreateProductCommandSchema,
+  ShopeeStartLivestreamCommandSchema,
   ToolResultSchema
 } from "@liveseller/contracts";
 import { RUNTIME_ORIGIN } from "./background";
 import {
   type ComposerState,
   type ExecutedCommand,
+  type ExecutedLivestreamCommand,
   type ExecutedProductCommand,
   executeSellerCommand,
-  executeShopeeCreateProductCommand
+  executeShopeeCreateProductCommand,
+  executeShopeeStartLivestreamCommand
 } from "./commandExecutor";
 
 export type CapturedViewerMessage = {
@@ -42,6 +46,7 @@ export type RuntimeActionResponse = {
 export type PrepReviewDecisionResponse = {
   reviewPlan: ProductReviewPlan;
   createProductCommands: ShopeeCreateProductCommand[];
+  startLivestreamCommands: ShopeeStartLivestreamCommand[];
   raw: unknown;
 };
 
@@ -124,6 +129,7 @@ export type HandledReceiveNormalUserMessage = {
 export type HandledProductReviewDecision = {
   runtimeResponse: PrepReviewDecisionResponse;
   executedProductCommands: ExecutedProductCommand[];
+  executedLivestreamCommands: ExecutedLivestreamCommand[];
 };
 
 export function extractViewerMessage(row: Element): CapturedViewerMessage | null {
@@ -300,6 +306,9 @@ function parsePrepReviewDecisionResponse(raw: unknown): PrepReviewDecisionRespon
     createProductCommands: body.createProductCommands.map((command) =>
       ShopeeCreateProductCommandSchema.parse(command)
     ),
+    startLivestreamCommands: Array.isArray(body.startLivestreamCommands)
+      ? body.startLivestreamCommands.map((command) => ShopeeStartLivestreamCommandSchema.parse(command))
+      : [],
     raw
   };
 }
@@ -343,10 +352,14 @@ export async function handleProductReviewDecision(
   const executedProductCommands = runtimeResponse.createProductCommands.map((command) =>
     executeShopeeCreateProductCommand(command)
   );
+  const executedLivestreamCommands = runtimeResponse.startLivestreamCommands.map((command) =>
+    executeShopeeStartLivestreamCommand(command)
+  );
 
   return {
     runtimeResponse,
-    executedProductCommands
+    executedProductCommands,
+    executedLivestreamCommands
   };
 }
 

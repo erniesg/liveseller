@@ -3,11 +3,14 @@ import {
   type ProductReviewPlan,
   type SellerFreeFormReviewResponse,
   type SellerReviewRound,
+  type LiveSessionSpec,
   type ShopeeCreateProductCommand,
+  type ShopeeStartLivestreamCommand,
   ProductReviewDecisionSchema,
   ProductReviewPlanSchema,
   SellerFreeFormReviewResponseSchema,
-  ShopeeCreateProductCommandSchema
+  ShopeeCreateProductCommandSchema,
+  ShopeeStartLivestreamCommandSchema
 } from "@liveseller/contracts";
 
 function reviewPlanStatus(items: ProductReviewPlan["items"]): ProductReviewPlan["status"] {
@@ -195,4 +198,50 @@ export function buildShopeeCreateProductCommands(
       })
     ];
   });
+}
+
+export function buildShopeeStartLivestreamCommands(
+  plan: ProductReviewPlan,
+  session: LiveSessionSpec,
+  createdAt = new Date().toISOString()
+): ShopeeStartLivestreamCommand[] {
+  if (plan.status !== "ready_for_publish" || plan.sessionId !== session.sessionId) {
+    return [];
+  }
+
+  const productIds = plan.items
+    .filter((item) => item.decision.status === "approved" || item.decision.status === "edited")
+    .map((item) => item.productId);
+
+  if (productIds.length === 0) {
+    return [];
+  }
+
+  return [
+    ShopeeStartLivestreamCommandSchema.parse({
+      commandId: `cmd-prepare-livestream-${session.sessionId}`,
+      sessionId: session.sessionId,
+      kind: "prepare_livestream",
+      createdAt,
+      approvalId: `approval-prepare-livestream-${session.sessionId}`,
+      approvalStatus: "approved",
+      safetyMode: "create_session_capture_credentials",
+      payload: {
+        title: session.title,
+        productIds,
+        publicOverlayUrl: `/?runtimeOrigin=http%3A%2F%2F127.0.0.1%3A8787&sessionId=${encodeURIComponent(session.sessionId)}`,
+        shopeeSetupSteps: [
+          "open_live_center",
+          "create_live_session",
+          "capture_stream_credentials",
+          "bind_public_overlay_preview"
+        ],
+        streamCredentialHandling: "transient_capture_redacted_evidence",
+        credentialEvidence: "redacted_presence_only",
+        cameraPreviewRequired: true,
+        goLive: false
+      },
+      citations: plan.citations
+    })
+  ];
 }
