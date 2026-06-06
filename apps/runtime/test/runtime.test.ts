@@ -18,6 +18,7 @@ import {
   routeRuntimeEvent
 } from "../src/runtime";
 import { createRuntimeSessionStore } from "../src/sessionStore";
+import { createRuntimeServer } from "../src/server";
 
 function viewerEvent(text: string, language?: LanguageCode): RuntimeEvent {
   return {
@@ -230,5 +231,48 @@ describe("live brain policy runtime", () => {
       eventCount: 2
     });
     expect(store.summary().status).toBe("closed");
+  });
+
+  it("finalizes prep review decisions over HTTP and returns create-product commands", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const decision = {
+        decisionId: "decision-prod-cooling-tee-approved-http",
+        productId: "prod-cooling-tee",
+        status: "approved" as const,
+        decidedBy: "seller" as const,
+        decidedAt: "2026-06-06T02:35:00.000Z",
+        reason: "Seller approved from extension side panel.",
+        citations: validProductReviewPlan.items[0]!.product.evidence
+      };
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/prep/review-decisions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reviewPlan: validProductReviewPlan,
+          decision
+        })
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.reviewPlan.status).toBe("partially_approved");
+      expect(body.createProductCommands).toHaveLength(1);
+      expect(body.createProductCommands[0]).toMatchObject({
+        kind: "create_product",
+        productId: "prod-cooling-tee",
+        approvalDecisionId: "decision-prod-cooling-tee-approved-http"
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
   });
 });

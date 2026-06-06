@@ -15,6 +15,7 @@ import {
 } from "../src/commandExecutor";
 import {
   buildProductReviewDecision,
+  handleProductReviewDecision,
   extractViewerMessage,
   handleReceiveNormalUserMessage,
   installReceiveNormalUserMessageHook,
@@ -305,6 +306,49 @@ describe("Shopee extension command safety", () => {
         productId,
         status: "rejected"
       });
+  });
+
+  it("posts seller approval decisions and executes returned create-product commands", async () => {
+    const productId = validProductReviewPlan.items[0]!.productId;
+    const decision = buildProductReviewDecision(
+      validProductReviewPlan,
+      productId,
+      "approve",
+      "2026-06-06T02:30:00.000Z"
+    );
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.decision).toMatchObject({
+        productId,
+        status: "approved"
+      });
+      return new Response(
+        JSON.stringify({
+          reviewPlan: {
+            ...validProductReviewPlan,
+            status: "ready_for_publish",
+            items: validProductReviewPlan.items.map((item) =>
+              item.productId === productId ? { ...item, decision } : item
+            )
+          },
+          createProductCommands: [validShopeeCreateProductCommand]
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    });
+
+    const result = await handleProductReviewDecision(validProductReviewPlan, decision, { fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:8787/api/prep/review-decisions",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(result.runtimeResponse.createProductCommands).toHaveLength(1);
+    expect(result.executedProductCommands[0]?.toolResult.status).toBe("applied");
+    expect(result.executedProductCommands[0]?.command?.kind).toBe("create_product");
   });
 
   it("keeps OpenAI keys out of extension manifest", () => {

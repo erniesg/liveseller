@@ -4,18 +4,22 @@ import {
   type ProductReviewDecision,
   type ProductReviewPlan,
   type RuntimeEvent,
+  type ShopeeCreateProductCommand,
   type ToolResult,
   AuditEventSchema,
   LiveActionSchema,
   ProductReviewDecisionSchema,
   ProductReviewPlanSchema,
+  ShopeeCreateProductCommandSchema,
   ToolResultSchema
 } from "@liveseller/contracts";
 import { RUNTIME_ORIGIN } from "./background";
 import {
   type ComposerState,
   type ExecutedCommand,
-  executeSellerCommand
+  type ExecutedProductCommand,
+  executeSellerCommand,
+  executeShopeeCreateProductCommand
 } from "./commandExecutor";
 
 export type CapturedViewerMessage = {
@@ -32,6 +36,12 @@ export type RuntimeActionResponse = {
   actions: LiveAction[];
   toolResults: ToolResult[];
   auditEvents: AuditEvent[];
+  raw: unknown;
+};
+
+export type PrepReviewDecisionResponse = {
+  reviewPlan: ProductReviewPlan;
+  createProductCommands: ShopeeCreateProductCommand[];
   raw: unknown;
 };
 
@@ -109,6 +119,11 @@ export type HandledReceiveNormalUserMessage = {
   runtimeResponse: RuntimeActionResponse;
   executedCommands: ExecutedCommand[];
   reviewPayload: ReviewPayload;
+};
+
+export type HandledProductReviewDecision = {
+  runtimeResponse: PrepReviewDecisionResponse;
+  executedProductCommands: ExecutedProductCommand[];
 };
 
 export function extractViewerMessage(row: Element): CapturedViewerMessage | null {
@@ -272,6 +287,67 @@ export async function postRuntimeEvent(
   }
 
   return parseRuntimeActionResponse(await response.json());
+}
+
+function parsePrepReviewDecisionResponse(raw: unknown): PrepReviewDecisionResponse {
+  const body = asRecord(raw);
+  if (!body || !Array.isArray(body.createProductCommands)) {
+    throw new Error("Prep review decision response must include createProductCommands[]");
+  }
+
+  return {
+    reviewPlan: ProductReviewPlanSchema.parse(body.reviewPlan),
+    createProductCommands: body.createProductCommands.map((command) =>
+      ShopeeCreateProductCommandSchema.parse(command)
+    ),
+    raw
+  };
+}
+
+export async function postProductReviewDecision(
+  reviewPlan: ProductReviewPlan,
+  decision: ProductReviewDecision,
+  runtimeOrigin = RUNTIME_ORIGIN,
+  fetchImpl: HandleReceiveNormalUserMessageOptions["fetchImpl"] = fetch
+): Promise<PrepReviewDecisionResponse> {
+  const response = await fetchImpl(`${runtimeOrigin}/api/prep/review-decisions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      reviewPlan: ProductReviewPlanSchema.parse(reviewPlan),
+      decision: ProductReviewDecisionSchema.parse(decision)
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Runtime rejected product review decision: ${response.status}`);
+  }
+
+  return parsePrepReviewDecisionResponse(await response.json());
+}
+
+export async function handleProductReviewDecision(
+  reviewPlan: ProductReviewPlan,
+  decision: ProductReviewDecision,
+  options: {
+    runtimeOrigin?: string;
+    fetchImpl?: HandleReceiveNormalUserMessageOptions["fetchImpl"];
+  } = {}
+): Promise<HandledProductReviewDecision> {
+  const runtimeResponse = await postProductReviewDecision(
+    reviewPlan,
+    decision,
+    options.runtimeOrigin,
+    options.fetchImpl
+  );
+  const executedProductCommands = runtimeResponse.createProductCommands.map((command) =>
+    executeShopeeCreateProductCommand(command)
+  );
+
+  return {
+    runtimeResponse,
+    executedProductCommands
+  };
 }
 
 export function buildReviewPayload(

@@ -1,8 +1,14 @@
 import { createServer } from "node:http";
 import {
+  ProductReviewDecisionSchema,
+  ProductReviewPlanSchema,
   RuntimeEventSchema,
   validLiveSessionSpec
 } from "@liveseller/contracts";
+import {
+  buildShopeeCreateProductCommands,
+  recordProductReviewDecision
+} from "./approvals";
 import { createRuntimeSessionStore } from "./sessionStore";
 
 const sessionStore = createRuntimeSessionStore(validLiveSessionSpec);
@@ -37,6 +43,19 @@ export function createRuntimeServer() {
         const event = RuntimeEventSchema.parse(await readJson(req));
         const routed = sessionStore.route(event);
         sendJson(res, 200, routed);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/prep/review-decisions") {
+        const body = await readJson(req);
+        const reviewPlan = ProductReviewPlanSchema.parse(body.reviewPlan);
+        const decision = ProductReviewDecisionSchema.parse(body.decision);
+        const updatedReviewPlan = recordProductReviewDecision(reviewPlan, decision);
+        const createProductCommands = buildShopeeCreateProductCommands(updatedReviewPlan);
+        sendJson(res, 200, {
+          reviewPlan: updatedReviewPlan,
+          createProductCommands
+        });
         return;
       }
 
