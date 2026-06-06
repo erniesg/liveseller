@@ -353,7 +353,7 @@ function approvedCreateProductCommands() {
   return state.createProductCommands.filter((command) =>
     command.kind === "create_product" &&
     (command.approvalStatus === "approved" || command.approvalStatus === "edited")
-  );
+  ).slice(0, 1);
 }
 
 function liveLineupProducts() {
@@ -1168,8 +1168,8 @@ async function approveAll() {
   if (pending.length === 0) {
     const approvedCommands = approvedCreateProductCommands();
     if (approvedCommands.length > 0) {
-      appendProductEvent("Shopee creation retry started", `${approvedCommands.length} approved product command(s) will be retried.`);
-      await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: true });
+      appendProductEvent("Shopee creation retry started", "Retrying the first approved product only.");
+      await queueShopeeProductCreation({ autoSubmit: true, prepareLive: true });
       return;
     }
     if (state.reviewPlanSource === "operator" && state.reviewPlan && publishableItems().length > 0) {
@@ -1187,21 +1187,21 @@ async function approveAll() {
       });
       state.reviewPlan = response.reviewPlan;
       state.reviewPlanSource = "operator";
-      state.createProductCommands = response.createProductCommands || [];
+      state.createProductCommands = (response.createProductCommands || []).slice(0, 1);
       state.startLivestreamCommands = response.startLivestreamCommands || [];
       renderReviewPlan();
       renderCommands();
-      appendProductEvent("Create commands rebuilt", `${state.createProductCommands.length} Shopee create command(s) ready.`, "success");
-      await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: true });
+      appendProductEvent("Create command rebuilt", "One Shopee create command is ready.", "success");
+      await queueShopeeProductCreation({ autoSubmit: true, prepareLive: true });
       return;
     }
     appendProductEvent("Approve all skipped", "No pending or approved products are ready to create.");
     return;
   }
-  appendProductEvent("Approve all started", `${pending.length} product(s) sent to Codex operator.`);
+  appendProductEvent("Approve all started", "Creating the first product only while we verify the Shopee path.");
 
   if (state.reviewPlanSource === "operator" && state.reviewPlan) {
-    const decisions = pending.map((item) => {
+    const decisions = pending.slice(0, 1).map((item) => {
       const card = document.querySelector(`[data-product-id="${item.productId}"]`);
       return buildDecision(card, item, "approved");
     });
@@ -1225,24 +1225,22 @@ async function approveAll() {
     });
     state.reviewPlan = response.reviewPlan;
     state.reviewPlanSource = "operator";
-    state.createProductCommands = response.createProductCommands || [];
+    state.createProductCommands = (response.createProductCommands || []).slice(0, 1);
     state.startLivestreamCommands = response.startLivestreamCommands || [];
     resetLiveSessionState();
     state.queuedProductCreation = [];
     state.productCreationFilled = false;
     renderReviewPlan();
     renderCommands();
-    appendProductEvent("Approve all complete", `${state.createProductCommands.length} Shopee create command(s) ready.`, "success");
-    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: true });
+    appendProductEvent("Approve all complete", "One Shopee create command is ready.", "success");
+    await queueShopeeProductCreation({ autoSubmit: true, prepareLive: true });
     return;
   }
 
-  for (const item of pending) {
-    const latest = currentItems().find((candidate) => candidate.productId === item.productId);
-    const card = latest ? document.querySelector(`[data-product-id="${latest.productId}"]`) : undefined;
-    if (latest && card) {
-      await submitDecision(card, latest, "approved");
-    }
+  const latest = currentItems().find((candidate) => candidate.productId === pending[0]?.productId);
+  const card = latest ? document.querySelector(`[data-product-id="${latest.productId}"]`) : undefined;
+  if (latest && card) {
+    await submitDecision(card, latest, "approved");
   }
 }
 
@@ -1829,7 +1827,7 @@ async function queueShopeeProductCreation(options = {}) {
   const approvedCommands = state.createProductCommands.filter((command) =>
     command.kind === "create_product" &&
     (command.approvalStatus === "approved" || command.approvalStatus === "edited")
-  );
+  ).slice(0, 1);
   if (approvedCommands.length === 0) {
     writeLog("#product-creation-log", "No approved create_product command is available.");
     appendProductEvent("Shopee creation skipped", "No approved create_product command is available.", "error");
@@ -1937,9 +1935,7 @@ async function confirmShopeeProductPublish(options = {}) {
       : response?.error || response?.evidence?.error || response?.status || "Shopee did not click Save and Publish.",
     response?.ok ? "success" : "error"
   );
-  if (response?.ok && options.continueQueue && state.createProductCommands.length > 0) {
-    await queueShopeeProductCreation({ autoSubmit: true, continueQueue: true, prepareLive: options.prepareLive === true, internalQueue: true });
-  } else if (response?.ok && options.prepareLive) {
+  if (response?.ok && options.prepareLive) {
     appendProductEvent("Shopee publish queue complete", "Registering approved products for livestream context.", "success");
     try {
       await registerApprovedLiveSession();

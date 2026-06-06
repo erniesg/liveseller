@@ -7,6 +7,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 const SHOPEE_LIVE_SETUP_URL = "https://live.shopee.sg/pc/setup?from=seller_center";
 const SHOPEE_CREATE_PRODUCT_URL = "https://seller.shopee.sg/portal/product/new";
+let productAutomationInFlight = false;
 
 function waitForTabLoad(tabId) {
   return new Promise((resolve) => {
@@ -564,6 +565,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === "liveseller:queue-create-products") {
+    if (productAutomationInFlight) {
+      sendResponse({ ok: false, status: "product_creation_already_running", commandCount: 0 });
+      return false;
+    }
     const commands = approvedCreateProductCommands(message.commands);
     chrome.storage.session.set({
       "liveseller:queuedCreateProducts": {
@@ -576,6 +581,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, status: "no_approved_create_product_commands", commandCount: 0 });
       return false;
     }
+    productAutomationInFlight = true;
     findOrCreateShopeeProductTab({ resetToNewProduct: true })
       .then((tab) => fillShopeeProductDraft(tab, commands[0], { submit: false }))
       .then((result) => sendResponse({
@@ -589,16 +595,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         status: "queued_for_authenticated_tab",
         commandCount: commands.length,
         error: error.message
-      }));
+      }))
+      .finally(() => {
+        productAutomationInFlight = false;
+      });
     return true;
   }
 
   if (message?.type === "liveseller:confirm-product-publish") {
+    if (productAutomationInFlight) {
+      sendResponse({ ok: false, status: "product_creation_already_running", commandCount: 0 });
+      return false;
+    }
     const commands = approvedCreateProductCommands(message.commands);
     if (commands.length === 0) {
       sendResponse({ ok: false, status: "no_approved_create_product_commands", commandCount: 0 });
       return false;
     }
+    productAutomationInFlight = true;
     findOrCreateShopeeProductTab({ resetToNewProduct: false })
       .then((tab) => fillShopeeProductDraft(tab, commands[0], { submit: true }))
       .then((result) => sendResponse({
@@ -612,7 +626,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         status: "product_form_submit_failed",
         commandCount: commands.length,
         error: error.message
-      }));
+      }))
+      .finally(() => {
+        productAutomationInFlight = false;
+      });
     return true;
   }
 
