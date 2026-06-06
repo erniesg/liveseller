@@ -298,4 +298,154 @@ describe("public overlay", () => {
     expect(JSON.stringify(requests).toLowerCase()).not.toContain("streamkey");
     expect(JSON.stringify(requests).toLowerCase()).not.toContain("rtmp://");
   });
+
+  it("renders seller-only live guidance from runtime actions, memory, and rolling summary", async () => {
+    const currentProduct = vintageJewelryLiveSessionSpec.products[0]!;
+    const overlayState = {
+      ...validOverlayState,
+      sessionId: vintageJewelryLiveSessionSpec.sessionId,
+      currentProductId: currentProduct.id,
+      productCard: {
+        productId: currentProduct.id,
+        title: currentProduct.title,
+        price: currentProduct.price,
+        currency: currentProduct.currency,
+        stock: currentProduct.stock,
+        imageUri: currentProduct.media.images[0]!.uri
+      }
+    };
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith(`/api/live-sessions/${vintageJewelryLiveSessionSpec.sessionId}/spec`)) {
+        return new Response(JSON.stringify(vintageJewelryLiveSessionSpec), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.endsWith(`/api/overlay/${vintageJewelryLiveSessionSpec.sessionId}`)) {
+        return new Response(JSON.stringify(overlayState), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.endsWith(`/api/live-sessions/${vintageJewelryLiveSessionSpec.sessionId}/memory`)) {
+        return new Response(
+          JSON.stringify({
+            sessionMemory: {
+              topQuestions: ["Can you confirm the blue stone material?"],
+              productInterest: {
+                [currentProduct.id]: 2
+              },
+              escalations: ["Discount needs Shopee-backed confirmation."],
+              recommendations: ["Move to the cameo brooch after the blue brooch close-up."]
+            },
+            viewerMemory: [
+              {
+                viewerId: "seller-console-viewer",
+                displayName: "Test Buyer",
+                knownQuestions: ["Any discount for the brooch?"],
+                productAffinity: {
+                  [currentProduct.id]: 1
+                },
+                riskFlags: [],
+                lastSeenAt: "2026-06-06T02:50:00.000Z"
+              }
+            ]
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+      if (url.endsWith(`/api/live-sessions/${vintageJewelryLiveSessionSpec.sessionId}/summary`)) {
+        return new Response(
+          JSON.stringify({
+            eventCount: 4,
+            publicReplies: 1,
+            escalations: 1,
+            approvalsRequested: 1,
+            orders: 0,
+            viewerPeak: 8,
+            recommendations: ["Summarize material questions and voucher blockers after stream."]
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+      if (url.endsWith("/api/runtime/events")) {
+        const event = JSON.parse(String(init?.body));
+        const actions = event.payload.text.includes("discount")
+          ? [
+              {
+                actionId: "action-approval-discount",
+                type: "request_approval",
+                risk: "medium",
+                requiresApproval: true,
+                reason: "Discount negotiation requires seller confirmation.",
+                payload: {
+                  kind: "request_approval",
+                  prompt: "Confirm whether this voucher is Shopee-backed before posting.",
+                  proposedPublicText: "Seller will confirm voucher eligibility."
+                }
+              }
+            ]
+          : [
+              {
+                actionId: "action-safe-price",
+                type: "send_reply",
+                risk: "low",
+                requiresApproval: false,
+                reason: "Low-risk factual price answer from ProductRecord.",
+                payload: {
+                  kind: "send_reply",
+                  text: "The brooch is SGD 88.00.",
+                  viewerId: "seller-console-viewer",
+                  language: "en",
+                  productId: currentProduct.id
+                }
+              }
+            ];
+        return new Response(
+          JSON.stringify({
+            overlayState,
+            actions
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+      return new Response(JSON.stringify({ error: "not_found" }), { status: 404 });
+    });
+
+    render(
+      <SellerConsole
+        runtimeOrigin="http://runtime.test"
+        sessionId={vintageJewelryLiveSessionSpec.sessionId}
+        fetchImpl={fetchImpl as typeof fetch}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText(vintageJewelryLiveSessionSpec.title)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Can you confirm the blue stone material?")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "How much is the gold grape brooch?" }
+    });
+    fireEvent.click(screen.getByText("Send to runtime"));
+    await waitFor(() => expect(screen.getByText("Say this")).toBeInTheDocument());
+    expect(screen.getByText("The brooch is SGD 88.00.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Any discount for the brooch?" }
+    });
+    fireEvent.click(screen.getByText("Send to runtime"));
+    await waitFor(() => expect(screen.getByText("Needs approval")).toBeInTheDocument());
+    expect(screen.getByText("Confirm whether this voucher is Shopee-backed before posting.")).toBeInTheDocument();
+    expect(screen.getByText("Summarize material questions and voucher blockers after stream.")).toBeInTheDocument();
+  });
 });

@@ -11,9 +11,53 @@ type SellerConsoleProps = {
 
 type ConsoleStatus = "connecting" | "live" | "error";
 
+type SellerAction = {
+  actionId: string;
+  type: string;
+  risk: string;
+  requiresApproval: boolean;
+  reason: string;
+  payload?: {
+    kind?: string;
+    text?: string;
+    prompt?: string;
+    proposedPublicText?: string;
+    sellerMessage?: string;
+    suggestedScript?: string;
+    productId?: string;
+  };
+};
+
 type RuntimeRouteResponse = {
   overlayState: OverlayState;
-  actions: Array<{ actionId: string; type: string; risk: string; requiresApproval: boolean; reason: string }>;
+  actions: SellerAction[];
+};
+
+type SellerMemorySnapshot = {
+  sessionMemory?: {
+    topQuestions?: string[];
+    productInterest?: Record<string, number>;
+    escalations?: string[];
+    recommendations?: string[];
+  };
+  viewerMemory?: Array<{
+    viewerId: string;
+    displayName?: string;
+    knownQuestions?: string[];
+    productAffinity?: Record<string, number>;
+    riskFlags?: string[];
+    lastSeenAt?: string;
+  }>;
+};
+
+type RollingSummarySnapshot = {
+  eventCount?: number;
+  publicReplies?: number;
+  escalations?: number;
+  approvalsRequested?: number;
+  orders?: number;
+  viewerPeak?: number;
+  recommendations?: string[];
 };
 
 const hostTranscriptSamples = [
@@ -58,6 +102,53 @@ async function postRuntimeEvent(
   };
 }
 
+async function fetchSellerMemory(
+  runtimeOrigin: string,
+  sessionId: string,
+  fetchImpl: typeof fetch
+): Promise<SellerMemorySnapshot> {
+  const response = await fetchImpl(`${runtimeOrigin}/api/live-sessions/${sessionId}/memory`);
+  if (!response.ok) {
+    return {};
+  }
+  return await response.json() as SellerMemorySnapshot;
+}
+
+async function fetchRollingSummary(
+  runtimeOrigin: string,
+  sessionId: string,
+  fetchImpl: typeof fetch
+): Promise<RollingSummarySnapshot> {
+  const response = await fetchImpl(`${runtimeOrigin}/api/live-sessions/${sessionId}/summary`);
+  if (!response.ok) {
+    return {};
+  }
+  return await response.json() as RollingSummarySnapshot;
+}
+
+function actionCueLabel(action: SellerAction): string {
+  if (action.type === "send_reply" && action.risk === "low" && !action.requiresApproval) {
+    return "Say this";
+  }
+  if (action.type === "request_approval" || action.requiresApproval) {
+    return "Needs approval";
+  }
+  if (action.type === "escalate") {
+    return "Escalate";
+  }
+  return "Runtime cue";
+}
+
+function actionCueText(action: SellerAction): string {
+  return (
+    action.payload?.text ??
+    action.payload?.prompt ??
+    action.payload?.sellerMessage ??
+    action.payload?.suggestedScript ??
+    action.reason
+  );
+}
+
 export function SellerConsole({
   runtimeOrigin = "http://127.0.0.1:8787",
   sessionId = vintageJewelryLiveSessionSpec.sessionId,
@@ -72,6 +163,8 @@ export function SellerConsole({
   const [viewerName, setViewerName] = useState("Test Buyer");
   const [lastActions, setLastActions] = useState<RuntimeRouteResponse["actions"]>([]);
   const [lastResult, setLastResult] = useState("Ready");
+  const [sellerMemory, setSellerMemory] = useState<SellerMemorySnapshot>();
+  const [rollingSummary, setRollingSummary] = useState<RollingSummarySnapshot>();
 
   const publicOverlayUrl = useMemo(() => {
     const params = new URLSearchParams({
@@ -80,6 +173,9 @@ export function SellerConsole({
     });
     return `/?${params.toString()}`;
   }, [runtimeOrigin, sessionId]);
+  const sellerVisibleActions = lastActions.filter((action) =>
+    ["send_reply", "draft_reply", "request_approval", "escalate"].includes(action.type)
+  );
 
   async function syncOverlay() {
     const nextState = await fetchOverlayState(runtimeOrigin, sessionId, fetchImpl);
@@ -87,11 +183,21 @@ export function SellerConsole({
     return nextState;
   }
 
+  async function syncSellerContext() {
+    const [nextMemory, nextSummary] = await Promise.all([
+      fetchSellerMemory(runtimeOrigin, sessionId, fetchImpl),
+      fetchRollingSummary(runtimeOrigin, sessionId, fetchImpl)
+    ]);
+    setSellerMemory(nextMemory);
+    setRollingSummary(nextSummary);
+  }
+
   async function sendEvent(event: RuntimeEvent, label: string) {
     const routed = await postRuntimeEvent(runtimeOrigin, event, fetchImpl);
     setOverlayState(routed.overlayState);
     setLastActions(routed.actions);
     setLastResult(label);
+    await syncSellerContext();
   }
 
   useEffect(() => {
@@ -99,13 +205,17 @@ export function SellerConsole({
 
     async function connect() {
       try {
-        const [nextSession, nextOverlay] = await Promise.all([
+        const [nextSession, nextOverlay, nextMemory, nextSummary] = await Promise.all([
           fetchSessionSpec(runtimeOrigin, sessionId, fetchImpl),
-          fetchOverlayState(runtimeOrigin, sessionId, fetchImpl)
+          fetchOverlayState(runtimeOrigin, sessionId, fetchImpl),
+          fetchSellerMemory(runtimeOrigin, sessionId, fetchImpl),
+          fetchRollingSummary(runtimeOrigin, sessionId, fetchImpl)
         ]);
         if (!cancelled) {
           setSession(nextSession);
           setOverlayState(nextOverlay);
+          setSellerMemory(nextMemory);
+          setRollingSummary(nextSummary);
           setStatus("live");
         }
       } catch {
@@ -311,9 +421,51 @@ export function SellerConsole({
             ))}
           </div>
           <div className="seller-action-log">
-            {lastActions.map((action) => (
+            {sellerVisibleActions.map((action) => (
               <p key={action.actionId}>{action.type} · {action.risk} · {action.requiresApproval ? "approval" : "auto"}</p>
             ))}
+          </div>
+        </section>
+
+        <section className="seller-panel seller-guidance-panel" aria-label="Live guidance">
+          <div className="seller-panel-heading">
+            <h2>Live guidance</h2>
+            <span>{rollingSummary?.eventCount ?? 0} events</span>
+          </div>
+          <div className="seller-guidance-list">
+            {sellerVisibleActions.map((action) => (
+              <article key={action.actionId} className={`seller-guidance-cue seller-guidance-${action.risk}`}>
+                <span>{actionCueLabel(action)}</span>
+                <strong>{actionCueText(action)}</strong>
+                {action.payload?.proposedPublicText ? <p>{action.payload.proposedPublicText}</p> : null}
+                <p>{action.reason}</p>
+              </article>
+            ))}
+          </div>
+          <div className="seller-memory-grid">
+            <div>
+              <h3>Top questions</h3>
+              {(sellerMemory?.sessionMemory?.topQuestions ?? []).slice(0, 3).map((question) => (
+                <p key={question}>{question}</p>
+              ))}
+            </div>
+            <div>
+              <h3>Buyer context</h3>
+              {(sellerMemory?.viewerMemory ?? []).slice(0, 3).map((viewer) => (
+                <p key={viewer.viewerId}>
+                  {viewer.displayName ?? viewer.viewerId}: {(viewer.knownQuestions ?? [])[0] ?? "watching"}
+                </p>
+              ))}
+            </div>
+            <div>
+              <h3>Session summary</h3>
+              <p>{rollingSummary?.publicReplies ?? 0} public replies · {rollingSummary?.approvalsRequested ?? 0} approvals</p>
+              {[...(sellerMemory?.sessionMemory?.recommendations ?? []), ...(rollingSummary?.recommendations ?? [])]
+                .slice(0, 3)
+                .map((recommendation) => (
+                  <p key={recommendation}>{recommendation}</p>
+                ))}
+            </div>
           </div>
         </section>
       </section>

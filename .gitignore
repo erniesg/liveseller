@@ -6,6 +6,8 @@ dist/
 .env.*
 artifacts/
 coverage/
+playwright-report/
+test-results/
 *.log
 .DS_Store
 data/*.sqlite
