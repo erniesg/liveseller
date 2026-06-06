@@ -23,6 +23,10 @@ button {
   padding: 9px 12px;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 button:disabled {
   background: #fed7aa;
   color: #64748b;
@@ -67,6 +71,12 @@ label {
   justify-content: space-between;
 }
 
+.topbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
 .topbar {
   position: sticky;
   top: 0;
@@ -102,6 +112,24 @@ label {
 .status.error {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.icon-button {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-grid;
+  font-size: 16px;
+  justify-items: center;
+  min-height: 34px;
+  padding: 0;
+  width: 34px;
+}
+
+.secondary-button {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  width: 100%;
 }
 
 .config-panel,
@@ -215,6 +243,64 @@ details.diagnostics[open] {
   display: grid;
   gap: 8px;
   grid-template-columns: 1fr 1fr;
+}
+
+.live-stage-panel {
+  background: #0f172a;
+  border-color: #111827;
+  color: #f8fafc;
+}
+
+.live-stage-header {
+  align-items: start;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.live-stage-header p {
+  color: #cbd5e1;
+}
+
+#live-camera-frame,
+.live-preview-placeholder {
+  aspect-ratio: 9 / 16;
+  background: #020617;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #cbd5e1;
+  min-height: 360px;
+  width: 100%;
+}
+
+#live-camera-frame {
+  display: block;
+}
+
+.live-preview-placeholder {
+  align-items: center;
+  display: grid;
+  justify-items: center;
+  padding: 16px;
+  text-align: center;
+}
+
+.ai-overlay-panel {
+  background: #fff;
+}
+
+.visually-hidden {
+  border: 0 !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  height: 1px !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  position: absolute !important;
+  white-space: nowrap !important;
+  width: 1px !important;
 }
 
 .log {

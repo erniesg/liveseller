@@ -327,6 +327,84 @@ describe("Codex app-server operator review loop", () => {
     }
   });
 
+  it("creates generated sidepanel-upload review drafts through the operator app-server", async () => {
+    const server = createOperatorHttpServer({
+      sidepanelDraftGenerator: async (input) => input.images.map((image, index) => ({
+        imageIndex: index,
+        title: index === 0 ? "Generated Jade Earrings" : "Generated Mosaic Brooch",
+        category: "Fashion Accessories",
+        price: index === 0 ? 18.8 : 28.8,
+        stock: 12,
+        description: `Generated seller-review listing from ${image.name}.`,
+        bulletPoints: [`Visible product from ${image.name}`]
+      }))
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected local HTTP server address");
+    }
+
+    const product = {
+      ...validProductReviewPlan.items[0]!.product,
+      id: "sidepanel-upload-001",
+      sku: "SIDE-001",
+      title: "Uploaded product shell 1",
+      sourceConfidence: 0.75
+    };
+    const secondProduct = {
+      ...product,
+      id: "sidepanel-upload-002",
+      sku: "SIDE-002",
+      title: "Uploaded product shell 2"
+    };
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/operator/sidepanel-draft`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "live-sidepanel-upload-001",
+          products: [product, secondProduct],
+          images: [
+            { name: "jade-earrings-front.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,AAAA" },
+            { name: "mosaic-brooch.jpg", type: "image/jpeg", dataUrl: "data:image/jpeg;base64,BBBB" }
+          ]
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.reviewPlan).toMatchObject({
+        sessionId: "live-sidepanel-upload-001",
+        status: "seller_review_required",
+        items: [
+          expect.objectContaining({
+            productId: "sidepanel-upload-001",
+            product: expect.objectContaining({
+              title: "Generated Jade Earrings",
+              price: 18.8
+            }),
+            decision: expect.objectContaining({
+              status: "pending"
+            })
+          }),
+          expect.objectContaining({
+            productId: "sidepanel-upload-002",
+            product: expect.objectContaining({
+              title: "Generated Mosaic Brooch",
+              price: 28.8
+            })
+          })
+        ]
+      });
+      expect(body.createProductCommands).toEqual([]);
+      expect(body.operatorEvents.map((event: { type: string }) => event.type)).toContain("turn_completed");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("exposes create-product command building only after seller approval", async () => {
     const server = createOperatorHttpServer();
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

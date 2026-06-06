@@ -13,7 +13,10 @@
           <p>LiveSeller Shopee Copilot</p>
           <h1 id="active-step-title">Start with products</h1>
         </div>
-        <span id="connection" class="status">Runtime unknown</span>
+        <div class="topbar-actions">
+          <span id="connection" class="status">Runtime unknown</span>
+          <button id="toggle-settings" class="icon-button" type="button" aria-label="Settings" aria-expanded="false">⚙</button>
+        </div>
       </header>
 
       <nav class="step-tabs" aria-label="Seller workflow">
@@ -22,7 +25,7 @@
         <button class="step-tab" data-step-target="audience" type="button">Talk to viewers</button>
       </nav>
 
-      <section class="panel config-panel" aria-label="Runtime configuration">
+      <section id="settings-panel" class="panel config-panel settings-panel" aria-label="Runtime configuration" hidden>
         <details class="diagnostics">
           <summary>Connection settings</summary>
           <label>
@@ -88,27 +91,28 @@
           <span>or click to choose files</span>
         </label>
         <div id="intake-preview-grid" class="preview-grid" aria-label="Selected product images"></div>
-        <div class="product-grid">
-          <label>Product name <input id="intake-product-name" /></label>
-          <label>Category <input id="intake-category" value="Fashion Accessories" /></label>
-          <label>Suggested price <input id="intake-price" value="19.90" /></label>
-          <label>Stock <input id="intake-stock" type="number" value="20" /></label>
+        <div class="product-grid draft-inputs" hidden>
+          <label>Product name <input id="intake-product-name" placeholder="Generated after processing" /></label>
+          <label>Category <input id="intake-category" placeholder="Generated after processing" /></label>
+          <label>Suggested price <input id="intake-price" placeholder="Generated after processing" /></label>
+          <label>Stock <input id="intake-stock" type="number" placeholder="Generated after processing" /></label>
         </div>
-        <label>Description <textarea id="intake-description" rows="3"></textarea></label>
+        <label class="draft-inputs" hidden>Description <textarea id="intake-description" rows="3"></textarea></label>
         <div class="button-row">
-          <button id="create-intake-review" type="button" disabled>Create review draft</button>
+          <button id="create-intake-review" type="button" disabled>Generate product plan</button>
           <button id="clear-intake" type="button">Clear</button>
         </div>
         <details class="diagnostics">
-          <summary>Technical details</summary>
+          <summary>More options</summary>
+          <button id="load-cached-plan" class="secondary-button" type="button">Load cached plan</button>
           <div id="intake-log" class="log">Drop images to begin.</div>
         </details>
       </section>
 
-      <section id="liveseller-prep-review" class="panel active-step" data-step="products" aria-label="Seller material review" aria-live="polite">
+      <section id="liveseller-prep-review" class="panel active-step" data-step="products" aria-label="Seller material review" aria-live="polite" hidden>
         <div class="section-heading">
           <div>
-            <h2>Review product plan</h2>
+            <h2>Product plan</h2>
             <p id="review-status">No review plan loaded.</p>
           </div>
           <button id="approve-all" type="button" disabled>Approve all</button>
@@ -116,7 +120,7 @@
         <div id="review-items" class="stack"></div>
       </section>
 
-      <section class="panel active-step" data-step="products" aria-label="Publish commands">
+      <section id="command-status-panel" class="panel active-step" data-step="products" aria-label="Publish commands" hidden>
         <div class="section-heading">
           <div>
             <h2>Product creation status</h2>
@@ -130,16 +134,16 @@
         </details>
       </section>
 
-      <section class="panel active-step" data-step="products" aria-label="Authenticated Shopee product creation">
+      <section id="shopee-publish-panel" class="panel active-step" data-step="products" aria-label="Authenticated Shopee product creation" hidden>
         <div class="section-heading">
           <div>
             <h2>Publish to Shopee</h2>
             <p>Fill the authenticated seller tab, then confirm only when the listing looks right.</p>
           </div>
-          <button id="queue-shopee-product-creation" type="button">Fill Shopee listing</button>
+          <button id="queue-shopee-product-creation" type="button" disabled>Fill Shopee listing</button>
         </div>
         <div class="button-row">
-          <button id="confirm-shopee-product-publish" type="button">Confirm Save and Publish</button>
+          <button id="confirm-shopee-product-publish" type="button" disabled>Confirm Save and Publish</button>
         </div>
         <details class="diagnostics">
           <summary>Technical details</summary>
@@ -150,11 +154,27 @@
       <section id="liveseller-live-control" class="panel" data-step="live" aria-label="Private livestream control plan">
         <div class="section-heading">
           <div>
-            <h2>Prepare live room</h2>
-            <p>Choose the products, preview your camera, then press Go Live when Shopee is ready.</p>
+            <h2>Live preview</h2>
+            <p>Preview your camera with product overlays, then prepare Shopee and go live.</p>
           </div>
-          <button id="prepare-livestream" type="button" disabled>Prepare livestream</button>
+          <button id="prepare-livestream" type="button" disabled>Prepare live</button>
         </div>
+        <section class="inline-panel live-stage-panel" aria-label="Seller-only live preview">
+          <div class="live-stage-header">
+            <div>
+              <h3>Camera + AI overlays</h3>
+              <p id="live-preview-status">Approve products to start the live preview.</p>
+            </div>
+            <span id="live-agent-status" class="tag">AI idle</span>
+          </div>
+          <iframe id="live-camera-frame" title="Seller camera and overlay preview" allow="camera; microphone; autoplay" hidden></iframe>
+          <div id="live-preview-placeholder" class="live-preview-placeholder">Camera preview appears here.</div>
+        </section>
+        <section class="inline-panel" aria-label="Viewer access">
+          <h3>Viewer URL</h3>
+          <p id="viewer-url-status">Prepare Shopee Live to get the viewer link.</p>
+          <input id="viewer-url" readonly placeholder="Viewer URL appears after Shopee preview is ready" />
+        </section>
         <div class="button-row">
           <button id="go-live" type="button" disabled>Go Live</button>
         </div>
@@ -163,14 +183,14 @@
           <div id="live-product-lineup" class="lineup-list">Approve products first.</div>
         </section>
         <div class="button-row">
-          <button id="ai-prepare-shopee-preview" type="button">Prepare Shopee preview</button>
-          <button id="start-overlay-pipe" type="button" disabled>Start camera preview</button>
+          <button id="ai-prepare-shopee-preview" type="button">Capture Shopee preview</button>
+          <button id="start-overlay-pipe" type="button" disabled>Start stream publisher</button>
           <button id="refresh-camera-status" type="button">Refresh preview</button>
           <button id="stop-overlay-pipe" type="button">Stop preview</button>
         </div>
         <section class="inline-panel" aria-label="Camera and Shopee path">
-          <h3>Seller-only camera preview</h3>
-          <p>Confirm the camera and overlay look right before going live.</p>
+          <h3>Live logs</h3>
+          <p>Runtime records preview, RTMP capture, overlay tool calls, and Go Live progress here.</p>
           <div id="camera-status-log" class="log">Camera compositor idle.</div>
         </section>
         <ol id="launch-checklist" class="checklist">
@@ -186,15 +206,16 @@
         </details>
       </section>
 
-      <section class="panel" data-step="live" aria-label="Overlay background">
+      <section class="panel ai-overlay-panel" data-step="live" aria-label="AI-generated overlays">
         <div class="section-heading">
           <div>
-            <h2>Overlay look</h2>
-            <p>Change or reuse the stream background while the live preview is running.</p>
+            <h2>AI stream director</h2>
+            <p>Voice and viewer events generate product overlays, background changes, and seller prompts.</p>
           </div>
-          <button id="apply-overlay-background" type="button">Apply background</button>
+          <button id="apply-overlay-background" type="button">Generate overlay</button>
         </div>
-        <div class="product-grid">
+        <div id="ai-overlay-summary" class="stack">No AI overlay action yet.</div>
+        <div class="product-grid visually-hidden" aria-hidden="true" hidden>
           <label>
             Mode
             <select id="overlay-background-mode">
@@ -207,7 +228,7 @@
             <input id="overlay-background-value" value="#0f766e" />
           </label>
         </div>
-        <label>
+        <label class="visually-hidden" aria-hidden="true" hidden>
           Label
           <input id="overlay-background-label" value="Camera test teal" />
         </label>

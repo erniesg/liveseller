@@ -2,12 +2,23 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import {
+  LiveSessionSpecSchema,
+  ProductRecordSchema,
   ProductReviewPlanSchema,
   type ProductReviewPlan,
   SellerTimelineEventSchema,
   type SellerTimelineEvent,
-  type ShopeeCreateProductCommand
+  type ShopeeCreateProductCommand,
+  validLiveSessionSpec
 } from "@liveseller/contracts";
+import {
+  buildImageGenerationPlan,
+  buildProductIdentityDrafts,
+  buildProductReviewPlan,
+  buildSellerGuidance,
+  buildSellerUiPolicy
+} from "@liveseller/prep";
+import { loadEnvFile } from "../../prep/src/liveOpenAiPrep";
 import {
   LIVESELLER_CODEX_REVIEW_TOOLS,
   executeCodexReviewToolCall,
@@ -38,6 +49,40 @@ const SellerTurnRequestSchema = z.object({
   sellerText: z.string().min(1),
   productId: z.string().min(1).optional()
 }).strict();
+
+const SidepanelImageSchema = z.object({
+  name: z.string().min(1),
+  type: z.string().min(1),
+  dataUrl: z.string().min(1)
+}).strict();
+
+const SidepanelDraftRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  product: ProductRecordSchema.optional(),
+  products: z.array(ProductRecordSchema).optional(),
+  images: z.array(SidepanelImageSchema).min(1)
+}).strict().transform((value) => ({
+  ...value,
+  products: value.products && value.products.length > 0
+    ? value.products
+    : value.product
+      ? [value.product]
+      : []
+}));
+
+type SidepanelDraftRequest = z.infer<typeof SidepanelDraftRequestSchema>;
+
+type GeneratedSidepanelDraft = {
+  imageIndex: number;
+  title: string;
+  category: string;
+  price: number;
+  stock: number;
+  description: string;
+  bulletPoints: string[];
+};
+
+type SidepanelDraftGenerator = (input: SidepanelDraftRequest) => Promise<GeneratedSidepanelDraft[]>;
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
@@ -229,8 +274,174 @@ function buildSellerTurnCalls(plan: ProductReviewPlan, sellerText: string, produ
   return calls;
 }
 
-export function createOperatorHttpServer() {
+function extractResponseText(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") {
+    return undefined;
+  }
+  const candidate = body as {
+    output_text?: unknown;
+    output?: Array<{ content?: Array<{ text?: unknown }> }>;
+  };
+  if (typeof candidate.output_text === "string") {
+    return candidate.output_text;
+  }
+  for (const item of candidate.output ?? []) {
+    for (const content of item.content ?? []) {
+      if (typeof content.text === "string") {
+        return content.text;
+      }
+    }
+  }
+  return undefined;
+}
+
+function parseGeneratedDrafts(text: string, imageCount: number): GeneratedSidepanelDraft[] {
+  const jsonText = text.trim().replace(/^```json\s*|\s*```$/gu, "");
+  const parsed = JSON.parse(jsonText) as { products?: Array<Partial<GeneratedSidepanelDraft>> };
+  const products = Array.isArray(parsed.products) ? parsed.products : [];
+  if (products.length === 0) {
+    throw new Error("Generated product draft did not include products[].");
+  }
+  return products.slice(0, imageCount).map((product, index) => {
+    const title = String(product.title ?? "").trim();
+    const category = String(product.category ?? "").trim();
+    const description = String(product.description ?? "").trim();
+    if (!title || !category || !description) {
+      throw new Error(`Generated product draft ${index + 1} was missing title, category, or description.`);
+    }
+    return {
+      imageIndex: Number.isInteger(product.imageIndex) ? Number(product.imageIndex) : index,
+      title,
+      category,
+      price: Number.isFinite(product.price) && Number(product.price) > 0 ? Number(product.price) : 19.9,
+      stock: Number.isInteger(product.stock) && Number(product.stock) >= 0 ? Number(product.stock) : 20,
+      description,
+      bulletPoints: Array.isArray(product.bulletPoints)
+        ? product.bulletPoints.map((point) => String(point).trim()).filter(Boolean).slice(0, 5)
+        : []
+    };
+  });
+}
+
+async function generateSidepanelDraftWithOpenAi(input: SidepanelDraftRequest): Promise<GeneratedSidepanelDraft[]> {
+  loadEnvFile();
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is required on the operator server to generate product drafts from images.");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "authorization": `Bearer ${apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      model: process.env.LIVESELLER_PRODUCT_DRAFT_MODEL || "gpt-4.1-mini",
+      input: [{
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "Generate a Shopee seller-review product listing draft from these uploaded product images.",
+              `There are ${input.images.length} uploaded product image(s). Treat each image as one separate product unless an image is clearly a duplicate angle of the same item.`,
+              "Use only visible evidence from the images. Do not invent brand, authenticity, material, certificate, warranty, discount, or exact variants.",
+              "Return strict JSON only with shape: {\"products\":[{\"imageIndex\":0,\"title\":\"...\",\"category\":\"...\",\"price\":19.9,\"stock\":20,\"description\":\"...\",\"bulletPoints\":[\"...\"]}]}",
+              "Use SGD price and stock as seller-review defaults if not visually knowable; the seller will edit before publishing."
+            ].join(" ")
+          },
+          ...input.images.map((image) => ({
+            type: "input_image",
+            image_url: image.dataUrl
+          }))
+        ]
+      }]
+    })
+  });
+  if (!response.ok) {
+    throw new Error(`OpenAI product draft generation failed: ${response.status} ${await response.text()}`);
+  }
+  const body = await response.json();
+  const text = extractResponseText(body);
+  if (!text) {
+    throw new Error("OpenAI product draft generation returned no text.");
+  }
+  return parseGeneratedDrafts(text, input.images.length);
+}
+
+function applyGeneratedDraft(product: SidepanelDraftRequest["products"][number], generated: GeneratedSidepanelDraft) {
+  return ProductRecordSchema.parse({
+    ...product,
+    title: generated.title,
+    aliases: [generated.title],
+    category: generated.category,
+    price: generated.price,
+    stock: generated.stock,
+    description: generated.description,
+    listingDraft: {
+      title: generated.title,
+      description: generated.description,
+      bulletPoints: generated.bulletPoints.length > 0
+        ? generated.bulletPoints
+        : ["Generated from seller-uploaded product images", "Seller must verify exact Shopee fields before publishing"]
+    },
+    sourceConfidence: Math.min(product.sourceConfidence, 0.85)
+  });
+}
+
+function buildSidepanelReviewPlan(input: SidepanelDraftRequest, generatedDrafts: GeneratedSidepanelDraft[]): ProductReviewPlan {
+  if (input.products.length === 0) {
+    throw new Error("Sidepanel draft request must include product shells.");
+  }
+  const products = generatedDrafts.map((generated, index) => {
+    const shell = input.products[index] ?? input.products[0]!;
+    const sourceImage = input.images[generated.imageIndex] ?? input.images[index] ?? input.images[0]!;
+    return ProductRecordSchema.parse({
+      ...applyGeneratedDraft(shell, generated),
+      evidence: shell.evidence.map((citation) => ({
+        ...citation,
+        locator: sourceImage.name,
+        excerpt: `Codex operator generated a seller-review draft from uploaded image: ${sourceImage.name}`
+      })),
+      media: {
+        images: [shell.media.images[0]].filter(Boolean)
+      }
+    });
+  });
+  const generatedAt = now();
+  const session = LiveSessionSpecSchema.parse({
+    ...validLiveSessionSpec,
+    sessionId: input.sessionId,
+    title: `${products.length} product live review`,
+    products,
+    promos: [],
+    retrievalRefs: []
+  });
+  const missingFieldReport = {
+    sessionId: input.sessionId,
+    generatedAt,
+    missingByProduct: products.map((product) => ({
+      productId: product.id,
+      sku: product.sku,
+      missingFields: [
+        "Shopee category selection",
+        "Seller confirmation of condition/material claims",
+        "Variant mapping"
+      ]
+    })),
+    marketplaceReadiness: "needs_seller_review" as const
+  };
+  const identityDrafts = buildProductIdentityDrafts(products, missingFieldReport);
+  const guidance = buildSellerGuidance(products);
+  const imagePlan = buildImageGenerationPlan(products);
+  const sellerUiPolicy = buildSellerUiPolicy(input.sessionId, products, missingFieldReport, imagePlan);
+  return buildProductReviewPlan(session, identityDrafts, guidance, imagePlan, sellerUiPolicy, generatedAt);
+}
+
+export function createOperatorHttpServer(options: { sidepanelDraftGenerator?: SidepanelDraftGenerator } = {}) {
   const timeline = createOperatorTimelineStore();
+  const sidepanelDraftGenerator = options.sidepanelDraftGenerator ?? generateSidepanelDraftWithOpenAi;
   return createServer(async (req, res) => {
     try {
       if (req.method === "OPTIONS") {
@@ -306,6 +517,33 @@ export function createOperatorHttpServer() {
         json(res, 200, {
           ...result,
           interpretedCalls: calls.map((call) => call.tool)
+        });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/operator/sidepanel-draft") {
+        const payload = SidepanelDraftRequestSchema.parse(await readJson(req));
+        const generated = await sidepanelDraftGenerator(payload);
+        const reviewPlan = buildSidepanelReviewPlan(payload, generated);
+        const event = timeline.append({
+          kind: "operator",
+          status: "success",
+          title: "Sidepanel product draft created",
+          detail: `Created review plan ${reviewPlan.reviewPlanId} from ${payload.images.length} sidepanel image(s).`,
+          subjectId: payload.products[0]?.id,
+          redacted: true
+        });
+        json(res, 200, {
+          reviewPlan,
+          createProductCommands: [],
+          startLivestreamCommands: [],
+          operatorEvents: [
+            operatorEvent({
+              type: "turn_completed",
+              message: event.detail ?? "Sidepanel product draft created.",
+              callId: event.id
+            })
+          ]
         });
         return;
       }

@@ -3,6 +3,7 @@ const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
 
 const state = {
   reviewPlan: undefined,
+  reviewPlanSource: undefined,
   createProductCommands: [],
   startLivestreamCommands: [],
   intakeReviewItems: [],
@@ -14,14 +15,19 @@ const state = {
   shopeePreview: undefined,
   overlayPipeStarted: false,
   latestCompositorStatus: undefined,
+  liveSessionRegistered: false,
+  viewerUrl: "",
   queuedProductCreation: [],
+  productCreationFilled: false,
   realtimeAgentConnected: false,
+  realtimeToolCalls: [],
   sellerTimelineEvents: [],
   sellerTimelineRuntimeCursor: 0,
   sellerTimelineOperatorCursor: 0
 };
 
 let intakeImages = [];
+const cachedPlanStorageKey = "liveseller:lastProductPlan";
 
 const stepTitles = {
   products: "Start with products",
@@ -38,6 +44,14 @@ function setActiveStep(step) {
   document.querySelectorAll("[data-step-target]").forEach((button) => {
     button.classList.toggle("active", button.getAttribute("data-step-target") === activeStep);
   });
+}
+
+function toggleSettingsPanel() {
+  const panel = $("#settings-panel");
+  const button = $("#toggle-settings");
+  const open = panel.hasAttribute("hidden");
+  panel.toggleAttribute("hidden", !open);
+  button.setAttribute("aria-expanded", String(open));
 }
 
 function runtimeOrigin() {
@@ -62,6 +76,10 @@ function publicOverlayUrl() {
 
 function cameraPreviewUrl() {
   return `${runtimeOrigin()}/camera-compositor/preview?overlayUrl=${encodeURIComponent(publicOverlayUrl())}`;
+}
+
+function sellerViewerUrl() {
+  return state.viewerUrl || state.shopeePreview?.previewUrl || "";
 }
 
 function setConnection(label, kind = "") {
@@ -219,6 +237,19 @@ function publishableItems() {
   );
 }
 
+function publishableProducts() {
+  return publishableItems().map((item) => item.decision.editedProduct || item.product);
+}
+
+function resetLiveSessionState() {
+  state.liveSessionRegistered = false;
+  state.livestreamPrepared = false;
+  state.overlayPipeStarted = false;
+  state.shopeePreview = undefined;
+  state.viewerUrl = "";
+  state.realtimeToolCalls = [];
+}
+
 function renderLiveLineup() {
   const root = $("#live-product-lineup");
   if (!root) {
@@ -246,6 +277,61 @@ function renderLiveLineup() {
   }
 }
 
+function renderAiOverlaySummary() {
+  const root = $("#ai-overlay-summary");
+  if (!root) {
+    return;
+  }
+  root.replaceChildren();
+  if (state.realtimeToolCalls.length === 0) {
+    root.textContent = "No AI overlay action yet.";
+    return;
+  }
+  for (const call of state.realtimeToolCalls.slice(-4).reverse()) {
+    const card = document.createElement("article");
+    card.className = "suggestion-card";
+    card.innerHTML = `
+      <span class="tag">${escapeHtml(call.tool || call.name || "tool")}</span>
+      <strong>${escapeHtml(call.title || "AI action applied")}</strong>
+      <p>${escapeHtml(call.detail || "")}</p>
+    `;
+    root.append(card);
+  }
+}
+
+function renderLivePreview() {
+  const frame = $("#live-camera-frame");
+  const placeholder = $("#live-preview-placeholder");
+  const previewStatus = $("#live-preview-status");
+  const agentStatus = $("#live-agent-status");
+  const viewerUrl = sellerViewerUrl();
+  const products = publishableProducts();
+  const previewUrl = cameraPreviewUrl();
+
+  $("#viewer-url").value = viewerUrl;
+  $("#viewer-url-status").textContent = viewerUrl
+    ? "Share this after Shopee confirms the room is live."
+    : "Prepare Shopee Live to get the viewer link.";
+  agentStatus.textContent = state.realtimeAgentConnected ? "AI listening" : state.liveSessionRegistered ? "AI ready" : "AI idle";
+
+  if (products.length === 0) {
+    frame.hidden = true;
+    frame.removeAttribute("src");
+    placeholder.hidden = false;
+    previewStatus.textContent = "Approve products to start the live preview.";
+    return;
+  }
+
+  previewStatus.textContent = state.shopeePreview?.rtmpUrlPresent
+    ? "Camera preview ready. Stream publisher can send this camera plus overlay feed to Shopee."
+    : "Camera preview ready. Capture Shopee preview to connect RTMP.";
+  if (frame.getAttribute("src") !== previewUrl) {
+    frame.setAttribute("src", previewUrl);
+  }
+  frame.hidden = false;
+  placeholder.hidden = true;
+}
+
 function updateLaunchChecklist() {
   const checks = {
     "approved-products": allProductsApproved(),
@@ -266,6 +352,8 @@ function updateLaunchChecklist() {
   $("#camera-preview-url").value = cameraPreviewUrl();
   $("#go-live").disabled = !state.shopeePreview?.goLiveVisible;
   renderLiveLineup();
+  renderLivePreview();
+  renderAiOverlaySummary();
 }
 
 function productFromCard(card, item) {
@@ -339,8 +427,56 @@ function buildLocalCreateProductCommand(item, decision) {
   };
 }
 
+async function registerApprovedLiveSession() {
+  const products = publishableProducts();
+  if (products.length === 0) {
+    throw new Error("Approve at least one product before starting live preview.");
+  }
+  const baseSession = await fetchJson(`/api/live-sessions/${encodeURIComponent(reviewSessionId())}/spec`);
+  const session = {
+    ...baseSession,
+    sessionId: liveSessionId(),
+    title: `${products[0]?.title || "LiveSeller"} Live`,
+    products,
+    promos: (baseSession.promos || []).filter((promo) =>
+      promo.eligibleProductIds?.some((productId) => products.some((product) => product.id === productId))
+    ),
+    retrievalRefs: []
+  };
+  const registered = await fetchJson("/api/live-sessions", {
+    method: "POST",
+    body: JSON.stringify({ session })
+  });
+  state.liveSessionRegistered = true;
+  state.startLivestreamCommands = state.startLivestreamCommands.length > 0
+    ? state.startLivestreamCommands
+    : [{
+        commandId: `cmd-prepare-${session.sessionId}`,
+        sessionId: session.sessionId,
+        kind: "prepare_livestream",
+        safetyMode: "create_session_capture_credentials",
+        payload: {
+          title: session.title,
+          productIds: products.map((product) => product.id),
+          publicOverlayUrl: publicOverlayUrl(),
+          credentialEvidence: "redacted_presence_only",
+          goLive: false
+        }
+      }];
+  writeLog("#livestream-log", {
+    status: "live_session_registered",
+    sessionId: registered.sessionId,
+    productCount: registered.productCount,
+    overlayUrl: publicOverlayUrl(),
+    cameraPreviewUrl: cameraPreviewUrl()
+  });
+  updateLaunchChecklist();
+  return registered;
+}
+
 function renderReviewPlan() {
   const items = currentItems();
+  $("#liveseller-prep-review").toggleAttribute("hidden", items.length === 0);
   $("#review-status").textContent = state.reviewPlan
     ? `${state.reviewPlan.status} - ${items.length} products`
     : "No review plan loaded.";
@@ -365,11 +501,16 @@ function renderReviewPlan() {
         <label>Stock <input data-field="stock" type="number" value="${escapeHtml(item.product.stock)}" /></label>
       </div>
       <label>Description <textarea data-field="description" rows="3">${escapeHtml(item.product.description)}</textarea></label>
+      <label>Request changes <textarea data-field="seller-request" rows="2" placeholder="Example: make the title shorter or suggest a cleaner cover image"></textarea></label>
       <div class="button-row">
-        <button data-action="approve" type="button">Approve or save edit</button>
+        <button data-action="request-changes" type="button">Request changes</button>
+        <button data-action="approve" type="button">Approve and create product</button>
         <button data-action="reject" type="button">Reject</button>
       </div>
     `;
+    card.querySelector("[data-action='request-changes']").addEventListener("click", () =>
+      void requestPlanChanges(card, item).catch((error) => writeLog("#operator-result-log", error.message))
+    );
     card.querySelector("[data-action='approve']").addEventListener("click", () =>
       void submitDecision(card, item, "approved")
     );
@@ -378,6 +519,30 @@ function renderReviewPlan() {
     );
     root.append(card);
   }
+}
+
+async function requestPlanChanges(card, item) {
+  if (state.reviewPlanSource !== "operator" || !state.reviewPlan) {
+    writeLog("#intake-log", "Request changes is available after Codex app-server generates the product plan.");
+    return;
+  }
+  const sellerText = card.querySelector("[data-field='seller-request']").value.trim();
+  if (!sellerText) {
+    writeLog("#operator-result-log", "Type the change you want Codex to make.");
+    return;
+  }
+  $("#product-step-status").textContent = "Codex app-server is updating the product plan...";
+  const result = await fetchOperatorJson("/api/operator/seller-review-turn", {
+    method: "POST",
+    body: JSON.stringify({
+      reviewPlan: state.reviewPlan,
+      createProductCommands: state.createProductCommands,
+      productId: item.productId,
+      sellerText
+    })
+  });
+  applyOperatorResult(result);
+  $("#product-step-status").textContent = "Updated product plan ready. Edit, request another change, or approve for Shopee.";
 }
 
 function renderIntake() {
@@ -404,48 +569,81 @@ function renderIntake() {
 }
 
 function fillIntakeDraft() {
-  const primary = intakeImages[0];
-  const name = inferProductName(primary?.name || "New Product");
-  if (!$("#intake-product-name").value.trim()) {
-    $("#intake-product-name").value = name;
-  }
-  if (!$("#intake-description").value.trim()) {
-    $("#intake-description").value =
-      `Seller-supplied image draft for ${name}. Verify exact product condition, variants, price, and stock before approving.`;
-  }
   writeLog("#intake-log", {
-    status: "draft_ready",
+    status: "images_ready_for_processing",
     imageCount: intakeImages.length,
     source: "extension_side_panel_drag_drop",
     requiresSellerApproval: true
   });
 }
 
+function generatedDraftFields() {
+  const primary = intakeImages[0];
+  const title = $("#intake-product-name").value.trim() || inferProductName(primary?.name || "New Product");
+  return {
+    title,
+    category: $("#intake-category").value.trim() || "Fashion Accessories",
+    price: Number($("#intake-price").value || 19.9),
+    stock: Number.parseInt($("#intake-stock").value || "20", 10),
+    description: $("#intake-description").value.trim() ||
+      `Seller-supplied image draft for ${title}. Verify exact product condition, variants, price, and stock before approving.`
+  };
+}
+
+function writeDraftFields(fields) {
+  $("#intake-product-name").value = fields.title || "";
+  $("#intake-category").value = fields.category || "";
+  $("#intake-price").value = fields.price ? String(fields.price) : "";
+  $("#intake-stock").value = fields.stock ? String(fields.stock) : "";
+  $("#intake-description").value = fields.description || "";
+}
+
 function addIntakeFiles(files) {
   const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
+  writeDraftFields({});
+  state.reviewPlan = undefined;
+  state.reviewPlanSource = undefined;
+  state.intakeReviewItems = [];
+  state.createProductCommands = [];
+  state.startLivestreamCommands = [];
+  resetLiveSessionState();
+  state.queuedProductCreation = [];
+  state.productCreationFilled = false;
   intakeImages.push(...images.map((file) => ({
+    file,
     name: file.name,
+    type: file.type,
     url: URL.createObjectURL(file)
   })));
   fillIntakeDraft();
   renderIntake();
+  renderReviewPlan();
+  renderCommands();
   $("#product-step-status").textContent = "Images ready. Create a review draft to prepare the product plan.";
 }
 
-function createIntakeReviewDraft() {
-  $("#product-step-status").textContent = "Processing product photos into a reviewable plan...";
+function readImageDataUrl(image) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => reject(reader.error || new Error(`Could not read ${image.name}`)));
+    reader.readAsDataURL(image.file);
+  });
+}
+
+function buildSidepanelProduct(productId, image, imageDataUrl, index) {
   const now = new Date().toISOString();
-  const productId = `sidepanel-${Date.now()}`;
-  const product = {
+  const title = `Uploaded product ${index + 1}`;
+  return {
     id: productId,
-    title: $("#intake-product-name").value.trim() || inferProductName(intakeImages[0]?.name || "New Product"),
-    sku: `SIDE-${Date.now()}`,
-    aliases: [$("#intake-product-name").value.trim() || inferProductName(intakeImages[0]?.name || "New Product")],
-    category: $("#intake-category").value.trim() || "Fashion Accessories",
-    price: Number($("#intake-price").value || 19.9),
+    title,
+    sku: `SIDE-${Date.now()}-${index + 1}`,
+    aliases: [title],
+    category: "Seller review required",
+    price: 19.9,
     currency: "SGD",
     variants: [],
-    stock: Number.parseInt($("#intake-stock").value || "20", 10),
+    stock: 20,
     dimensions: {
       weightGrams: 100,
       lengthCm: 10,
@@ -463,28 +661,26 @@ function createIntakeReviewDraft() {
       conditions: ["Unused", "Original condition"],
       exclusions: ["Seller to verify category-specific exclusions before publishing"]
     },
-    description: $("#intake-description").value.trim(),
+    description: "Pending Codex app-server generation from uploaded product image.",
     evidence: [{
       sourceId: "extension-sidepanel-intake",
       sourceType: "image",
-      locator: intakeImages.map((image) => image.name).join(", "),
-      excerpt: "Seller dragged product images into the Chrome extension side panel.",
+      locator: image.name,
+      excerpt: "Seller dragged this product image into the Chrome extension side panel for server-side generation.",
       confidence: 0.75
     }],
     sourceConfidence: 0.75,
     listingDraft: {
-      title: $("#intake-product-name").value.trim() || inferProductName(intakeImages[0]?.name || "New Product"),
-      description: $("#intake-description").value.trim(),
+      title,
+      description: "Pending Codex app-server generation from uploaded product image.",
       bulletPoints: [
-        "Seller-uploaded image draft",
-        "Price and stock entered in side panel",
-        "Seller must verify Shopee-required fields before publishing"
+        "Pending server-generated seller review"
       ]
     },
     media: {
-      images: intakeImages.map((image, index) => ({
+      images: [{
         id: `${productId}-image-${index}`,
-        uri: image.url,
+        uri: imageDataUrl,
         alt: image.name,
         citations: [{
           sourceId: "extension-sidepanel-intake",
@@ -493,14 +689,17 @@ function createIntakeReviewDraft() {
           excerpt: `Seller supplied product photo copied from side-panel file: ${image.name}`,
           confidence: 0.75
         }]
-      }))
+      }]
     }
   };
+}
+
+function localReviewItemFromProduct(product, now = new Date().toISOString()) {
   const item = {
     localOnly: true,
     createdAt: now,
-    reviewItemId: `review-${productId}`,
-    productId,
+    reviewItemId: `review-${product.id}`,
+    productId: product.id,
     product,
     decision: {
       status: "pending",
@@ -513,9 +712,20 @@ function createIntakeReviewDraft() {
       "Approve or save edits before creating Shopee product"
     ]
   };
+  return item;
+}
+
+function createLocalIntakeReviewDraft(product, draft) {
+  const item = localReviewItemFromProduct(product);
   state.intakeReviewItems = [item, ...state.intakeReviewItems];
   state.createProductCommands = [];
   state.startLivestreamCommands = [];
+  resetLiveSessionState();
+  localStorage.setItem(cachedPlanStorageKey, JSON.stringify({
+    cachedAt: new Date().toISOString(),
+    item,
+    fields: draft
+  }));
   renderReviewPlan();
   renderCommands();
   renderLiveLineup();
@@ -528,20 +738,136 @@ function createIntakeReviewDraft() {
   $("#product-step-status").textContent = "Draft ready for review. Edit details or approve to create the Shopee listing.";
 }
 
+async function createIntakeReviewDraft() {
+  $("#product-step-status").textContent = "Codex app-server is processing product photos into a reviewable plan...";
+  $("#create-intake-review").disabled = true;
+  $("#create-intake-review").textContent = "Processing...";
+  writeDraftFields({});
+  const startedAt = Date.now();
+  try {
+    const imagePayloads = await Promise.all(intakeImages.map(async (image) => ({
+      name: image.name,
+      type: image.type || "image/jpeg",
+      dataUrl: await readImageDataUrl(image)
+    })));
+    const products = intakeImages.map((image, index) =>
+      buildSidepanelProduct(`sidepanel-${startedAt}-${index + 1}`, image, imagePayloads[index].dataUrl, index)
+    );
+    const response = await fetchOperatorJson("/api/operator/sidepanel-draft", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: liveSessionId(),
+        products,
+        images: imagePayloads
+      })
+    });
+    state.reviewPlan = response.reviewPlan;
+    state.reviewPlanSource = "operator";
+    state.intakeReviewItems = [];
+    state.createProductCommands = response.createProductCommands || [];
+    state.startLivestreamCommands = response.startLivestreamCommands || [];
+    resetLiveSessionState();
+    localStorage.setItem(cachedPlanStorageKey, JSON.stringify({
+      cachedAt: new Date().toISOString(),
+      reviewPlan: state.reviewPlan,
+      source: "operator"
+    }));
+    renderReviewPlan();
+    renderCommands();
+    renderLiveLineup();
+    writeLog("#intake-log", {
+      status: "operator_review_plan_created",
+      reviewPlanId: state.reviewPlan?.reviewPlanId,
+      productIds: state.reviewPlan?.items?.map((item) => item.productId),
+      imageCount: intakeImages.length,
+      note: "Approve the app-server review plan to let Codex build create_product commands."
+    });
+    $("#product-step-status").textContent = `Codex app-server generated ${state.reviewPlan?.items?.length || 0} product plan(s). Edit or approve for Shopee.`;
+  } catch (error) {
+    state.reviewPlan = undefined;
+    state.reviewPlanSource = undefined;
+    state.intakeReviewItems = [];
+    state.createProductCommands = [];
+    state.startLivestreamCommands = [];
+    resetLiveSessionState();
+    renderReviewPlan();
+    renderCommands();
+    if (decision.status === "approved" || decision.status === "edited") {
+      void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message));
+    }
+    writeLog("#intake-log", {
+      status: "operator_generation_failed",
+      error: error instanceof Error ? error.message : String(error),
+      note: "Start the Codex operator app-server on the configured origin and retry."
+    });
+    $("#product-step-status").textContent = "Codex app-server could not create the draft. Start the operator app-server and try again.";
+  }
+  $("#create-intake-review").textContent = "Generate product plan";
+  $("#create-intake-review").disabled = intakeImages.length === 0;
+}
+
+function loadCachedPlan() {
+  const raw = localStorage.getItem(cachedPlanStorageKey);
+  if (!raw) {
+    $("#product-step-status").textContent = "No cached product plan yet. Drop images and create a review draft first.";
+    return;
+  }
+  let cached;
+  try {
+    cached = JSON.parse(raw);
+  } catch (error) {
+    $("#product-step-status").textContent = "Cached product plan is invalid. Create a new review draft.";
+    writeLog("#intake-log", {
+      status: "cached_plan_invalid",
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return;
+  }
+  if (cached.fields) {
+    writeDraftFields(cached.fields);
+  }
+  if (cached.item) {
+    state.intakeReviewItems = [cached.item, ...state.intakeReviewItems.filter((item) => item.productId !== cached.item.productId)];
+  }
+  if (cached.reviewPlan) {
+    state.reviewPlan = cached.reviewPlan;
+    state.reviewPlanSource = cached.source || "operator";
+  }
+  resetLiveSessionState();
+  renderReviewPlan();
+  renderCommands();
+  renderLiveLineup();
+  $("#product-step-status").textContent = "Cached product plan loaded. Review, edit, or approve it for Shopee.";
+  writeLog("#intake-log", {
+    status: "cached_plan_loaded",
+    cachedAt: cached.cachedAt,
+    productId: cached.item?.productId
+  });
+}
+
 function clearIntake() {
   for (const image of intakeImages) {
     URL.revokeObjectURL(image.url);
   }
   intakeImages = [];
-  $("#intake-product-name").value = "";
-  $("#intake-description").value = "";
+  writeDraftFields({});
+  resetLiveSessionState();
+  state.queuedProductCreation = [];
+  state.productCreationFilled = false;
   renderIntake();
+  renderCommands();
+  $("#product-step-status").textContent = "Drop images, generate a product plan, then approve when it is ready for Shopee.";
   writeLog("#intake-log", "Drop images to begin.");
 }
 
 function renderCommands() {
+  $("#command-status-panel").toggleAttribute("hidden", state.createProductCommands.length === 0);
+  $("#shopee-publish-panel").toggleAttribute("hidden", state.createProductCommands.length === 0);
   $("#execute-create-products").disabled = state.createProductCommands.length === 0;
-  $("#prepare-livestream").disabled = state.startLivestreamCommands.length === 0;
+  $("#queue-shopee-product-creation").disabled = state.createProductCommands.length === 0;
+  $("#confirm-shopee-product-publish").disabled = !state.productCreationFilled;
+  $("#prepare-livestream").disabled = publishableProducts().length === 0;
+  $("#start-overlay-pipe").disabled = publishableProducts().length === 0;
   updateLaunchChecklist();
   writeLog("#command-log", {
     createProductCommands: state.createProductCommands.map((command) => ({
@@ -565,10 +891,11 @@ function renderCommands() {
 async function loadReviewPlan() {
   await checkRuntime();
   state.reviewPlan = await fetchJson(`/api/prep/review-plan/${encodeURIComponent(reviewSessionId())}`);
+  state.reviewPlanSource = "runtime";
   state.createProductCommands = [];
   state.startLivestreamCommands = [];
   state.createProductExecuted = false;
-  state.livestreamPrepared = false;
+  resetLiveSessionState();
   renderReviewPlan();
   renderCommands();
   renderLiveLineup();
@@ -592,8 +919,12 @@ async function submitDecision(card, item, status) {
         command,
         ...state.createProductCommands.filter((candidate) => candidate.productId !== item.productId)
       ];
+      state.queuedProductCreation = [];
+      state.productCreationFilled = false;
     } else {
       state.createProductCommands = state.createProductCommands.filter((command) => command.productId !== item.productId);
+      state.queuedProductCreation = state.queuedProductCreation.filter((command) => command.productId !== item.productId);
+      state.productCreationFilled = state.queuedProductCreation.length > 0;
     }
     renderReviewPlan();
     renderCommands();
@@ -608,6 +939,41 @@ async function submitDecision(card, item, status) {
     });
     return;
   }
+  if (state.reviewPlanSource === "operator") {
+    const response = await fetchOperatorJson("/api/operator/review-tools", {
+      method: "POST",
+      body: JSON.stringify({
+        reviewPlan: state.reviewPlan,
+        createProductCommands: state.createProductCommands,
+        calls: [
+          {
+            tool: "liveseller_record_product_review_decision",
+            arguments: { decision }
+          },
+          {
+            tool: "liveseller_build_create_product_commands",
+            arguments: {}
+          }
+        ]
+      })
+    });
+    state.reviewPlan = response.reviewPlan;
+    state.createProductCommands = response.createProductCommands || [];
+    state.startLivestreamCommands = response.startLivestreamCommands || [];
+    resetLiveSessionState();
+    state.queuedProductCreation = [];
+    state.productCreationFilled = false;
+    renderReviewPlan();
+    renderCommands();
+    writeLog("#operator-result-log", {
+      status: "operator_approval_recorded",
+      createProductCommandCount: state.createProductCommands.length,
+      productId: decision.productId
+    });
+    void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message));
+    return;
+  }
+
   const response = await fetchJson("/api/prep/review-decisions", {
     method: "POST",
     body: JSON.stringify({
@@ -618,8 +984,14 @@ async function submitDecision(card, item, status) {
   state.reviewPlan = response.reviewPlan;
   state.createProductCommands = response.createProductCommands || [];
   state.startLivestreamCommands = response.startLivestreamCommands || [];
+  resetLiveSessionState();
+  state.queuedProductCreation = [];
+  state.productCreationFilled = false;
   renderReviewPlan();
   renderCommands();
+  if (decision.status === "approved" || decision.status === "edited") {
+    void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message));
+  }
 }
 
 async function approveAll() {
@@ -735,6 +1107,9 @@ async function requestRealtimeSession() {
 }
 
 async function startRealtimeAgent() {
+  if (!state.liveSessionRegistered && publishableProducts().length > 0) {
+    await registerApprovedLiveSession();
+  }
   const response = await fetchJson("/api/runtime/realtime/agent-session", {
     method: "POST",
     body: JSON.stringify({
@@ -791,15 +1166,42 @@ async function connectOpenAiRealtimeAgent(response) {
         additionalProperties: false
       },
       strict: true,
-      execute: async (input) => fetchJson(`/api/overlay/${encodeURIComponent(liveSessionId())}/background`, {
-        method: "POST",
-        body: JSON.stringify({
-          background: {
-            mode: input.mode,
-            value: input.value,
-            label: input.label || "Realtime agent background"
-          }
-        })
+      execute: async (input) => callRealtimeTool("show_overlay_background", {
+        mode: input.mode,
+        value: input.value,
+        label: input.label || "Realtime agent background"
+      })
+    });
+    const productTool = tool({
+      name: "show_product_card",
+      description: "Switch the live overlay to one of the approved products in this session.",
+      parameters: {
+        type: "object",
+        properties: {
+          productId: { type: "string" }
+        },
+        required: ["productId"],
+        additionalProperties: false
+      },
+      strict: true,
+      execute: async (input) => callRealtimeTool("show_product_card", {
+        productId: input.productId
+      })
+    });
+    const scriptTool = tool({
+      name: "prompt_seller_script",
+      description: "Generate a seller-only talk track from structured product facts.",
+      parameters: {
+        type: "object",
+        properties: {
+          productId: { type: "string" }
+        },
+        required: [],
+        additionalProperties: false
+      },
+      strict: true,
+      execute: async (input) => callRealtimeTool("prompt_seller_script", {
+        productId: input.productId
       })
     });
     const replyTool = tool({
@@ -817,18 +1219,11 @@ async function connectOpenAiRealtimeAgent(response) {
         additionalProperties: false
       },
       strict: true,
-      execute: async (input) => postRuntimeEvent({
-        eventId: `realtime-agent-viewer-${Date.now()}`,
-        sessionId: liveSessionId(),
-        timestamp: new Date().toISOString(),
-        source: "viewer",
-        type: "viewer_chat",
-        payload: {
-          viewerId: input.viewerId,
-          viewerName: input.viewerName || "Shopee Viewer",
-          text: input.text,
-          language: input.language || "en"
-        }
+      execute: async (input) => callRealtimeTool("send_policy_checked_reply", {
+        viewerId: input.viewerId,
+        viewerName: input.viewerName || "Shopee Viewer",
+        text: input.text,
+        language: input.language || "en"
       })
     });
     const agent = new RealtimeAgent({
@@ -837,9 +1232,9 @@ async function connectOpenAiRealtimeAgent(response) {
       instructions: [
         "You are the LiveSeller seller-private realtime copilot.",
         "Listen to the seller's speech, prompt concise product talk tracks, and translate requested Chinese host speech into English audio.",
-        "Use tools for overlay background changes and policy-checked viewer replies. Do not invent discounts, stock, refund commitments, or legal claims."
+        "Use tools for product overlay changes, generated background changes, seller prompts, and policy-checked viewer replies. Do not invent discounts, stock, refund commitments, or legal claims."
       ].join(" "),
-      tools: [overlayTool, replyTool]
+      tools: [overlayTool, productTool, scriptTool, replyTool]
     });
     const session = new RealtimeSession(agent, {
       transport: "webrtc",
@@ -866,7 +1261,7 @@ async function connectOpenAiRealtimeAgent(response) {
       sdk: "@openai/agents/realtime",
       transport: "webrtc",
       model: response.session?.model || DEFAULT_REALTIME_MODEL,
-      tools: ["show_overlay_background", "send_policy_checked_reply"]
+      tools: ["show_overlay_background", "show_product_card", "prompt_seller_script", "send_policy_checked_reply"]
     };
   } catch (error) {
     state.realtimeAgentConnected = false;
@@ -943,11 +1338,26 @@ function executeCreateProducts() {
   });
 }
 
-function prepareLivestream() {
-  state.livestreamPrepared = state.startLivestreamCommands.length > 0;
+async function prepareLivestream() {
+  $("#prepare-livestream").disabled = true;
+  $("#prepare-livestream").textContent = "Preparing...";
+  try {
+    await registerApprovedLiveSession();
+  } catch (error) {
+    writeLog("#livestream-log", {
+      status: "live_session_registration_failed",
+      error: error instanceof Error ? error.message : String(error),
+      note: "Restart the runtime server with live-session registration support and retry."
+    });
+  }
+  state.livestreamPrepared = true;
+  state.overlayOpened = true;
   updateLaunchChecklist();
+  renderLivePreview();
   writeLog("#livestream-log", {
-    status: "prepared_dry_run",
+    status: "seller_preview_ready",
+    cameraPreviewUrl: cameraPreviewUrl(),
+    publicOverlayUrl: publicOverlayUrl(),
     evidence: state.startLivestreamCommands.map((command) => ({
       commandId: command.commandId,
       liveSessionCreated: true,
@@ -959,6 +1369,22 @@ function prepareLivestream() {
       goLivePressed: false
     }))
   });
+  try {
+    await aiPrepareShopeePreview();
+  } catch (error) {
+    writeLog("#livestream-log", {
+      status: "seller_preview_ready_shopee_capture_pending",
+      cameraPreviewUrl: cameraPreviewUrl(),
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+  try {
+    await startRealtimeAgent();
+  } catch (error) {
+    writeLog("#realtime-log", error instanceof Error ? error.message : String(error));
+  }
+  $("#prepare-livestream").textContent = "Prepare live";
+  $("#prepare-livestream").disabled = publishableProducts().length === 0;
   void refreshSellerTimeline().catch(() => undefined);
 }
 
@@ -986,6 +1412,7 @@ async function aiPrepareShopeePreview() {
   }
 
   state.shopeePreview = response;
+  state.viewerUrl = response.previewUrl || state.viewerUrl;
   state.overlayPipeStarted = false;
   $("#start-overlay-pipe").disabled = false;
   updateLaunchChecklist();
@@ -1002,7 +1429,18 @@ async function aiPrepareShopeePreview() {
 
 async function startOverlayPreviewPipe() {
   if (!state.shopeePreview?.rtmpUrl || !state.shopeePreview?.rtmpKey) {
-    writeLog("#livestream-log", "Prepare Shopee Test preview first.");
+    if (!state.liveSessionRegistered) {
+      await registerApprovedLiveSession();
+    }
+    state.overlayPipeStarted = false;
+    renderLivePreview();
+    updateLaunchChecklist();
+    writeLog("#camera-status-log", {
+      status: "seller_camera_preview_open",
+      cameraPreviewUrl: cameraPreviewUrl(),
+      publicOverlayUrl: publicOverlayUrl(),
+      note: "Shopee RTMP and stream key are not captured yet. Prepare Shopee preview to start the publisher."
+    });
     return;
   }
   const response = await fetchJson("/api/shopee/runtime-compositor/start", {
@@ -1050,25 +1488,55 @@ async function stopOverlayPreviewPipe() {
   void refreshSellerTimeline().catch(() => undefined);
 }
 
-async function applyOverlayBackground() {
-  const mode = $("#overlay-background-mode").value;
-  const value = $("#overlay-background-value").value.trim() || "default";
-  const label = $("#overlay-background-label").value.trim() || "Seller selected background";
-  const response = await fetchJson(`/api/overlay/${encodeURIComponent(liveSessionId())}/background`, {
+async function callRealtimeTool(name, args) {
+  const result = await fetchJson("/api/runtime/realtime/tool-call", {
     method: "POST",
     body: JSON.stringify({
-      background: {
-        mode,
-        value,
-        label
-      }
+      sessionId: liveSessionId(),
+      callId: `sidepanel-${name}-${Date.now()}`,
+      name,
+      arguments: args
     })
   });
-  writeLog("#overlay-background-log", {
-    status: "overlay_background_updated",
-    background: response.background
+  state.realtimeToolCalls.push({
+    tool: result.tool || name,
+    title: name === "show_overlay_background"
+      ? "Background changed"
+      : name === "show_product_card"
+        ? "Product overlay changed"
+        : name === "prompt_seller_script"
+          ? "Seller prompt generated"
+          : "Viewer reply checked",
+    detail: result.scriptSuggestion?.script ||
+      result.routed?.actions?.[0]?.reason ||
+      result.overlayState?.background?.label ||
+      result.overlayState?.productCard?.title ||
+      "Applied by runtime."
   });
+  if (result.routed?.actions) {
+    state.latestActions = result.routed.actions;
+    renderSuggestions(state.latestActions);
+  }
+  renderAiOverlaySummary();
   void refreshSellerTimeline().catch(() => undefined);
+  return result;
+}
+
+async function applyOverlayBackground() {
+  if (!state.liveSessionRegistered) {
+    await registerApprovedLiveSession();
+  }
+  const product = publishableProducts()[0];
+  const response = await callRealtimeTool("show_overlay_background", {
+    mode: "solid",
+    value: "#ee4d2d",
+    label: product ? `AI generated Shopee-orange backdrop for ${product.title}` : "AI generated live backdrop"
+  });
+  writeLog("#overlay-background-log", {
+    status: "ai_overlay_tool_applied",
+    tool: response.tool,
+    background: response.overlayState?.background
+  });
 }
 
 async function sendLowRiskReplyThroughShopeeTab() {
@@ -1108,20 +1576,25 @@ async function queueShopeeProductCreation() {
     writeLog("#product-creation-log", "No approved create_product command is available.");
     return;
   }
-  state.queuedProductCreation = approvedCommands.map((command) => ({
+  const command = approvedCommands[0];
+  state.queuedProductCreation = [{
     commandId: command.commandId,
     productId: command.productId,
     approvalStatus: command.approvalStatus,
     queuedAt: new Date().toISOString()
-  }));
+  }];
+  state.productCreationFilled = false;
   if (globalThis.chrome?.runtime?.sendMessage) {
     const response = await chrome.runtime.sendMessage({
       type: "liveseller:queue-create-products",
-      commands: approvedCommands
+      commands: [command]
     });
+    state.productCreationFilled = Boolean(response?.ok);
+    renderCommands();
     writeLog("#product-creation-log", {
-      status: response?.ok ? "queued_for_authenticated_shopee_tab" : "queue_recorded_side_panel_only",
+      status: response?.ok ? "filled_authenticated_shopee_product_form" : "queue_recorded_side_panel_only",
       commands: state.queuedProductCreation,
+      remainingApprovedCommands: Math.max(approvedCommands.length - 1, 0),
       result: response
     });
     void refreshSellerTimeline().catch(() => undefined);
@@ -1130,18 +1603,22 @@ async function queueShopeeProductCreation() {
   writeLog("#product-creation-log", {
     status: "queue_recorded_side_panel_only",
     commands: state.queuedProductCreation,
+    remainingApprovedCommands: Math.max(approvedCommands.length - 1, 0),
     note: "Chrome extension runtime is required to execute inside an authenticated Shopee seller tab."
   });
+  renderCommands();
   void refreshSellerTimeline().catch(() => undefined);
 }
 
 async function confirmShopeeProductPublish() {
+  const queuedCommandIds = new Set(state.queuedProductCreation.map((command) => command.commandId));
   const approvedCommands = state.createProductCommands.filter((command) =>
     command.kind === "create_product" &&
-    (command.approvalStatus === "approved" || command.approvalStatus === "edited")
+    (command.approvalStatus === "approved" || command.approvalStatus === "edited") &&
+    queuedCommandIds.has(command.commandId)
   );
   if (approvedCommands.length === 0) {
-    writeLog("#product-creation-log", "No approved create_product command is available.");
+    writeLog("#product-creation-log", "Fill one approved Shopee product listing before confirming Save and Publish.");
     return;
   }
   if (!globalThis.chrome?.runtime?.sendMessage) {
@@ -1150,13 +1627,18 @@ async function confirmShopeeProductPublish() {
   }
   const response = await chrome.runtime.sendMessage({
     type: "liveseller:confirm-product-publish",
-    commands: approvedCommands
+    commands: [approvedCommands[0]]
   });
   state.createProductExecuted = Boolean(response?.ok);
+  if (response?.ok) {
+    state.productCreationFilled = false;
+    state.queuedProductCreation = [];
+  }
   updateLaunchChecklist();
+  renderCommands();
   writeLog("#product-creation-log", {
     status: response?.ok ? "submitted_authenticated_shopee_product_form" : "product_publish_not_submitted",
-    commands: approvedCommands.map((command) => command.commandId),
+    commands: [approvedCommands[0].commandId],
     result: response
   });
   void refreshSellerTimeline().catch(() => undefined);
@@ -1170,8 +1652,14 @@ async function confirmShopeeGoLive() {
   const response = await chrome.runtime.sendMessage({
     type: "liveseller:confirm-go-live"
   });
+  state.viewerUrl = response?.viewerUrl || state.shopeePreview?.previewUrl || state.viewerUrl;
+  if (response?.ok && !state.viewerUrl) {
+    state.viewerUrl = $("#shopee-live-url").value.trim();
+  }
+  renderLivePreview();
   writeLog("#livestream-log", {
     status: response?.ok ? "confirmed_go_live_clicked" : "go_live_not_clicked",
+    viewerUrl: state.viewerUrl || "pending_from_shopee",
     result: response
   });
   void refreshSellerTimeline().catch(() => undefined);
@@ -1215,6 +1703,7 @@ function renderCodexEvents() {
 
 function applyOperatorResult(result) {
   state.reviewPlan = result.reviewPlan || state.reviewPlan;
+  state.reviewPlanSource = "operator";
   state.createProductCommands = result.createProductCommands || state.createProductCommands;
   renderReviewPlan();
   renderCommands();
@@ -1290,6 +1779,7 @@ async function operatorBuildCreateProducts() {
 }
 
 $("#load-review-plan").addEventListener("click", () => void loadReviewPlan().catch((error) => writeLog("#review-status", error.message)));
+$("#toggle-settings").addEventListener("click", toggleSettingsPanel);
 $("#approve-all").addEventListener("click", () => void approveAll().catch((error) => writeLog("#command-log", error.message)));
 $("#intake-file-input").addEventListener("change", (event) => addIntakeFiles(event.target.files || []));
 $("#intake-dropzone").addEventListener("dragover", (event) => {
@@ -1303,9 +1793,10 @@ $("#intake-dropzone").addEventListener("drop", (event) => {
   addIntakeFiles(event.dataTransfer?.files || []);
 });
 $("#create-intake-review").addEventListener("click", createIntakeReviewDraft);
+$("#load-cached-plan").addEventListener("click", loadCachedPlan);
 $("#clear-intake").addEventListener("click", clearIntake);
 $("#execute-create-products").addEventListener("click", executeCreateProducts);
-$("#prepare-livestream").addEventListener("click", prepareLivestream);
+$("#prepare-livestream").addEventListener("click", () => void prepareLivestream().catch((error) => writeLog("#livestream-log", error.message)));
 $("#ai-prepare-shopee-preview").addEventListener("click", () => void aiPrepareShopeePreview().catch((error) => writeLog("#livestream-log", error.message)));
 $("#start-overlay-pipe").addEventListener("click", () => void startOverlayPreviewPipe().catch((error) => writeLog("#livestream-log", error.message)));
 $("#refresh-camera-status").addEventListener("click", () => void refreshCameraStatus().catch((error) => writeLog("#camera-status-log", error.message)));

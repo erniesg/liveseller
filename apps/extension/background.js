@@ -91,27 +91,76 @@ function clickButtonByText(labels) {
 }
 
 function fillShopeeCreateProductForm(command, options = {}) {
+  function setNativeValue(element, value) {
+    const prototype = Object.getPrototypeOf(element);
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+    if (descriptor?.set) {
+      descriptor.set.call(element, String(value));
+    } else {
+      element.value = String(value);
+    }
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+  }
+
   function write(selectors, value) {
     for (const selector of selectors) {
       const element = document.querySelector(selector);
       if (element && ("value" in element)) {
-        element.value = String(value);
-        element.dispatchEvent(new Event("input", { bubbles: true }));
-        element.dispatchEvent(new Event("change", { bubbles: true }));
+        setNativeValue(element, value);
         return selector;
       }
     }
     return undefined;
   }
 
+  function fileFromDataUrl(image, index) {
+    const [header, base64] = String(image.uri || "").split(",");
+    if (!header?.startsWith("data:") || !base64) {
+      return undefined;
+    }
+    const mime = header.match(/^data:([^;]+)/)?.[1] || "image/jpeg";
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let byteIndex = 0; byteIndex < binary.length; byteIndex += 1) {
+      bytes[byteIndex] = binary.charCodeAt(byteIndex);
+    }
+    return new File([bytes], image.alt || `liveseller-product-${index + 1}.jpg`, { type: mime });
+  }
+
+  function uploadImages(product) {
+    const files = (product.media?.images || [])
+      .map(fileFromDataUrl)
+      .filter(Boolean)
+      .slice(0, 9);
+    if (files.length === 0) {
+      return { selector: undefined, count: 0 };
+    }
+    const input = document.querySelector("input[type='file'][accept*='image'], input[type='file']");
+    if (!(input instanceof HTMLInputElement)) {
+      return { selector: undefined, count: 0 };
+    }
+    const transfer = new DataTransfer();
+    for (const file of files) {
+      transfer.items.add(file);
+    }
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return { selector: "input[type='file']", count: files.length };
+  }
+
   const product = command?.payload?.product;
   if (!product) {
     return { ok: false, error: "missing_product_payload" };
   }
+  const uploadedImages = uploadImages(product);
   const filled = [
     write([
       "[name='product_name']",
       "[name='name']",
+      "input[maxlength='120']",
       "input[placeholder*='Product Name' i]",
       "input[placeholder*='product name' i]",
       "input[placeholder*='Brand Name' i]",
@@ -123,8 +172,9 @@ function fillShopeeCreateProductForm(command, options = {}) {
     write(["[name='sku']", "input[placeholder*='sku' i]"], product.sku)
   ].filter(Boolean);
   return {
-    ok: filled.length >= 4,
+    ok: filled.length >= 3 || uploadedImages.count > 0,
     filled,
+    uploadedImages,
     submitted: options.submit === true
       ? clickButtonByText(["Save and Publish", "Save and Delist", "Publish"])
       : false,
