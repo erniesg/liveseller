@@ -1456,9 +1456,6 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
       state.products = session.products || [];
       byId("session-status").textContent = state.products.length + " products ready";
       renderProducts();
-      if (state.products[0]) {
-        await showProduct(state.products[0].id);
-      }
       log("Seller UI ready", "Camera preview and public overlay loaded.", {
         publicOverlayUrl,
         cameraPreviewUrl

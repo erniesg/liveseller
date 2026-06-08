@@ -1893,6 +1893,7 @@ describe("live brain policy runtime", () => {
       expect(html).toContain("prompt_seller_script");
       expect(html).toContain("emit_translation_caption");
       expect(html).toContain("send_policy_checked_reply");
+      expect(html).not.toContain("await showProduct(state.products[0].id)");
       expect(html).toContain("Show product card");
       expect(html).toContain("Hide product card");
       expect(html).toContain("/product-card-visibility");
