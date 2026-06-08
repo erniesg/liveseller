@@ -21,8 +21,9 @@ const runtimeOrigin =
   viteEnv.env?.VITE_RUNTIME_ORIGIN ??
   "http://127.0.0.1:8787";
 const sessionId = params.get("sessionId") ?? undefined;
-const mode = params.get("mode");
+const mode = params.get("mode") ?? (window.location.pathname === "/seller" ? "seller" : "display");
 const transparent = params.get("transparent") === "1";
+const cameraEnabled = params.get("camera") !== "0";
 
 if (transparent) {
   document.documentElement.classList.add("overlay-transparent-page");
@@ -33,7 +34,12 @@ createRoot(root).render(
     {mode === "seller" ? (
       <SellerConsole runtimeOrigin={runtimeOrigin} sessionId={sessionId} />
     ) : (
-      <RuntimeOverlay runtimeOrigin={runtimeOrigin} sessionId={sessionId} transparent={transparent} />
+      <RuntimeOverlay
+        runtimeOrigin={runtimeOrigin}
+        sessionId={sessionId}
+        transparent={transparent}
+        cameraEnabled={cameraEnabled}
+      />
     )}
   </StrictMode>
 );

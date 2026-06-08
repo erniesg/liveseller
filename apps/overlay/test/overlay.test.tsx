@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { type RuntimeEvent, validLiveSessionSpec, validOverlayState, vintageJewelryLiveSessionSpec } from "@liveseller/contracts";
+import { type OverlayState, type RuntimeEvent, validLiveSessionSpec, validOverlayState, vintageJewelryLiveSessionSpec } from "@liveseller/contracts";
 import { App, RuntimeOverlay, fetchOverlayState, formatCountdown } from "../src/App";
 import { SellerConsole } from "../src/SellerConsole";
 
@@ -9,22 +9,209 @@ describe("public overlay", () => {
   it("renders product, promo, quantity, countdown, and multilingual captions", () => {
     render(<App state={validOverlayState} now={new Date("2026-06-06T03:55:00.000Z")} />);
 
-    expect(screen.getByLabelText("Overlay runtime status")).toHaveTextContent("Fixture mode");
+    expect(screen.queryByLabelText("Overlay runtime status")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Livestream display stage")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Current product and promotion")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Seller camera feed")).toBeInTheDocument();
+    expect(screen.getByLabelText("LiveSeller livestream overlay")).toHaveClass("overlay-has-captions", "overlay-has-product");
     expect(screen.getByText("Bamboo Cooling Tee")).toBeInTheDocument();
     expect(screen.getByText(/SGD 19.90/)).toBeInTheDocument();
     expect(screen.getByText(/42 left/)).toBeInTheDocument();
     expect(screen.getByText("Live Flash 10% Off")).toBeInTheDocument();
     expect(screen.getByText("50 claims left")).toBeInTheDocument();
-    expect(screen.getByText("Overlay-only")).toBeInTheDocument();
+    expect(screen.queryByText("Overlay-only")).not.toBeInTheDocument();
     expect(screen.getByText("05:00")).toBeInTheDocument();
     expect(screen.getByText(validOverlayState.caption.text)).toBeInTheDocument();
     expect(screen.getByText(validOverlayState.translatedCaptions[0]!.text)).toBeInTheDocument();
+    expect(screen.getByLabelText("Current product overlay")).toHaveClass("overlay-panel", "overlay-panel-lower-third");
+    expect(screen.getByLabelText("Live promotion")).toHaveClass("overlay-panel", "overlay-panel-promo");
+  });
+
+  it("renders camera-only display chrome before runtime generates overlays", () => {
+    render(
+      <App
+        state={{
+          ...validOverlayState,
+          caption: {
+            text: "",
+            language: "zh",
+            visible: false
+          },
+          translatedCaptions: [],
+          productCard: {
+            ...validOverlayState.productCard!,
+            visible: false
+          },
+          promoBanner: undefined,
+          background: {
+            mode: "off",
+            value: "off",
+            label: "Camera only"
+          }
+        }}
+      />
+    );
+
+    expect(screen.getByLabelText("Livestream display stage")).toBeInTheDocument();
+    expect(screen.getByLabelText("Seller camera feed")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Live promotion")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Current product overlay")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bamboo Cooling Tee")).not.toBeInTheDocument();
+    expect(screen.queryByText("FLASH SALE")).not.toBeInTheDocument();
+    expect(screen.queryByText(validOverlayState.caption.text)).not.toBeInTheDocument();
+    expect(screen.queryByText(validOverlayState.translatedCaptions[0]!.text)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("LiveSeller livestream overlay")).not.toHaveClass("overlay-has-captions", "overlay-has-product");
+  });
+
+  it("renders transparent overlay-only layers for camera compositing", () => {
+    render(
+      <App
+        cameraEnabled={false}
+        transparent
+        state={{
+          ...validOverlayState,
+          caption: {
+            text: "",
+            language: "zh",
+            visible: false
+          },
+          translatedCaptions: [],
+          productCard: {
+            ...validOverlayState.productCard!,
+            visible: false
+          },
+          promoBanner: undefined,
+          background: {
+            mode: "off",
+            value: "off",
+            label: "Camera only"
+          }
+        }}
+      />
+    );
+
+    expect(screen.getByLabelText("LiveSeller livestream overlay")).toHaveClass("overlay-shell-transparent", "overlay-bg-off");
+    expect(screen.queryByLabelText("Seller camera feed")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Live promotion")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Current product overlay")).not.toBeInTheDocument();
+    expect(screen.queryByText("FLASH SALE")).not.toBeInTheDocument();
+  });
+
+  it("polls runtime and renders dynamically generated realtime overlay state", async () => {
+    let liveState: OverlayState = {
+      ...validOverlayState,
+      caption: {
+        text: "",
+        language: "zh" as const,
+        visible: false
+      },
+      translatedCaptions: [],
+      productCard: {
+        ...validOverlayState.productCard!,
+        visible: false
+      },
+      promoBanner: undefined,
+      background: {
+        mode: "off" as const,
+        value: "off",
+        label: "Camera only"
+      }
+    };
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify(liveState), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    render(
+      <RuntimeOverlay
+        runtimeOrigin="http://runtime.test"
+        sessionId={validLiveSessionSpec.sessionId}
+        pollMs={25}
+        fetchImpl={fetchImpl as typeof fetch}
+        transparent
+        cameraEnabled={false}
+      />
+    );
+
+    await waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Seller camera feed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bamboo Cooling Tee")).not.toBeInTheDocument();
+
+    liveState = {
+      ...liveState,
+      caption: {
+        text: "这枚胸针今天只有一枚",
+        language: "zh",
+        visible: true
+      },
+      translatedCaptions: [
+        {
+          language: "en" as const,
+          text: "There is only one brooch available today."
+        }
+      ],
+      productCard: {
+        ...liveState.productCard!,
+        visible: true
+      },
+      background: {
+        mode: "solid" as const,
+        value: "#ee4d2d",
+        label: "Realtime generated background"
+      }
+    };
+
+    await waitFor(() => expect(screen.getByText("Bamboo Cooling Tee")).toBeInTheDocument());
+    expect(screen.getByText("这枚胸针今天只有一枚")).toBeInTheDocument();
+    expect(screen.getByText("There is only one brooch available today.")).toBeInTheDocument();
+    expect(screen.getByLabelText("LiveSeller livestream overlay")).toHaveClass("overlay-has-captions", "overlay-has-product", "overlay-bg-solid");
+  });
+
+  it("maps background presets to display classes without showing control chrome", () => {
+    render(
+      <App
+        state={{
+          ...validOverlayState,
+          background: {
+            mode: "kinetic",
+            value: "kinetic",
+            label: "Kinetic live background"
+          }
+        }}
+      />
+    );
+
+    expect(screen.getByLabelText("LiveSeller livestream overlay")).toHaveClass("overlay-bg-kinetic");
+    expect(screen.getByLabelText("Livestream display stage")).toHaveClass("overlay-stage");
+    expect(screen.getByText("FLASH SALE")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Overlay runtime status")).not.toBeInTheDocument();
   });
 
   it("keeps long captions in caption containers without warning in the valid fixture", () => {
     render(<App state={validOverlayState} />);
     expect(validOverlayState.layoutWarnings).toEqual([]);
     expect(screen.getByLabelText("Live captions")).toHaveClass("caption-band");
+  });
+
+  it("hides the public product card while preserving overlay state context", () => {
+    render(
+      <App
+        state={{
+          ...validOverlayState,
+          productCard: {
+            ...validOverlayState.productCard!,
+            visible: false
+          }
+        }}
+      />
+    );
+
+    expect(screen.queryByText("Bamboo Cooling Tee")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Live promotion")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Current product overlay")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("LiveSeller livestream overlay")).not.toHaveClass("overlay-has-product");
   });
 
   it("formats promo countdowns deterministically", () => {
@@ -85,7 +272,7 @@ describe("public overlay", () => {
       />
     );
 
-    await waitFor(() => expect(screen.getByLabelText("Overlay runtime status")).toHaveTextContent("Runtime live"));
+    await waitFor(() => expect(screen.getByText("Travel Cable Pouch")).toBeInTheDocument());
     expect(screen.getByText("Travel Cable Pouch")).toBeInTheDocument();
     expect(screen.getByText("这款收纳包适合旅行用")).toBeInTheDocument();
     expect(fetchImpl).toHaveBeenCalledWith(`http://runtime.test/api/overlay/${validLiveSessionSpec.sessionId}`);
@@ -108,7 +295,7 @@ describe("public overlay", () => {
       />
     );
 
-    await waitFor(() => expect(screen.getByLabelText("Overlay runtime status")).toHaveTextContent("Runtime offline"));
+    await waitFor(() => expect(fetchImpl).toHaveBeenCalledWith(`http://runtime.test/api/overlay/${validLiveSessionSpec.sessionId}`));
     expect(screen.getByText("Bamboo Cooling Tee")).toBeInTheDocument();
   });
 
@@ -155,6 +342,19 @@ describe("public overlay", () => {
           headers: { "content-type": "application/json" }
         });
       }
+      if (url.endsWith(`/api/overlay/${vintageJewelryLiveSessionSpec.sessionId}/product-card-visibility`)) {
+        const body = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({
+          ...overlayState,
+          productCard: {
+            ...overlayState.productCard,
+            visible: body.visible
+          }
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
       if (url.endsWith("/api/runtime/events")) {
         const event = JSON.parse(String(init?.body));
         requests.push(event);
@@ -197,6 +397,11 @@ describe("public overlay", () => {
       })
     ]));
     expect(within(screen.getByLabelText("Current overlay state")).getByText(switchedProduct.title)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Hide card"));
+    await waitFor(() => expect(screen.getByText("Hidden on public overlay")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Show card"));
+    await waitFor(() => expect(screen.getByText("Visible on public overlay")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("Send caption"));
     await waitFor(() => expect(requests).toEqual(
@@ -498,6 +703,18 @@ describe("public overlay", () => {
           { status: 200, headers: { "content-type": "application/json" } }
         );
       }
+      if (url.endsWith("/api/runtime/realtime/translation-session")) {
+        return new Response(
+          JSON.stringify({
+            client_secret: { value: "ephemeral-translation-secret" },
+            translation: {
+              callsEndpoint: "https://api.openai.com/v1/realtime/translations/calls",
+              overlayTool: "emit_realtime_translation"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
       if (url.endsWith("/api/runtime/realtime/tool-call")) {
         const body = JSON.parse(String(init?.body));
         toolCalls.push(body);
@@ -549,11 +766,12 @@ describe("public overlay", () => {
 
     await waitFor(() => expect(screen.getByText(vintageJewelryLiveSessionSpec.title)).toBeInTheDocument());
     expect(screen.getByLabelText("Public overlay source")).toHaveTextContent(
-      `/?runtimeOrigin=http%3A%2F%2Fruntime.test&sessionId=${vintageJewelryLiveSessionSpec.sessionId}`
+      `/display?runtimeOrigin=http%3A%2F%2Fruntime.test&sessionId=${vintageJewelryLiveSessionSpec.sessionId}&transparent=1&camera=0`
     );
 
-    fireEvent.click(screen.getByText("Start Realtime 2 voice agent"));
-    await waitFor(() => expect(screen.getByText("Realtime 2 voice agent ready")).toBeInTheDocument());
+    expect(screen.queryByText("Seller test console")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Start realtime translation"));
+    await waitFor(() => expect(screen.getByText("Realtime translation ready")).toBeInTheDocument());
 
     fireEvent.click(screen.getAllByText("Show with AI")[1]!);
     await waitFor(() => expect(toolCalls).toEqual(

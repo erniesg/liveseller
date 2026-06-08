@@ -378,6 +378,51 @@ function approvedCreateProductCommands() {
   ).slice(0, 1);
 }
 
+function createProductCommandUsesGeneratedImage(command) {
+  const image = command?.payload?.product?.media?.images?.[0];
+  return Boolean(
+    image?.uri?.startsWith?.("data:image/") &&
+    /generated|clean background|background/i.test(`${image.alt || ""} ${image.id || ""}`)
+  );
+}
+
+async function ensureGeneratedCreateProductCommand(reason = "create product") {
+  if (state.reviewPlanSource !== "operator" || !state.reviewPlan) {
+    return;
+  }
+  const approvedCommands = approvedCreateProductCommands();
+  if (approvedCommands.length > 0 && createProductCommandUsesGeneratedImage(approvedCommands[0])) {
+    return;
+  }
+  appendProductEvent("Clean product image generation started", reason);
+  const response = await fetchOperatorJson("/api/operator/review-tools", {
+    method: "POST",
+    body: JSON.stringify({
+      reviewPlan: state.reviewPlan,
+      createProductCommands: state.createProductCommands,
+      calls: [
+        {
+          tool: "liveseller_generate_image_edits",
+          arguments: {}
+        },
+        {
+          tool: "liveseller_build_create_product_commands",
+          arguments: {}
+        }
+      ]
+    })
+  });
+  state.reviewPlan = response.reviewPlan;
+  state.reviewPlanSource = "operator";
+  state.createProductCommands = (response.createProductCommands || []).slice(0, 1);
+  state.startLivestreamCommands = response.startLivestreamCommands || [];
+  resetLiveSessionState();
+  state.queuedProductCreation = [];
+  state.productCreationFilled = false;
+  renderReviewPlan();
+  renderCommands();
+}
+
 function liveLineupProducts() {
   const approvedProducts = publishableProducts();
   return approvedProducts.length > 0 ? approvedProducts : state.runtimeLiveSession?.products || [];
@@ -1214,10 +1259,16 @@ async function approveAll() {
         body: JSON.stringify({
           reviewPlan: state.reviewPlan,
           createProductCommands: state.createProductCommands,
-          calls: [{
-            tool: "liveseller_build_create_product_commands",
-            arguments: {}
-          }]
+          calls: [
+            {
+              tool: "liveseller_generate_image_edits",
+              arguments: {}
+            },
+            {
+              tool: "liveseller_build_create_product_commands",
+              arguments: {}
+            }
+          ]
         })
       });
       state.reviewPlan = response.reviewPlan;
@@ -1872,6 +1923,7 @@ async function queueShopeeProductCreation(options = {}) {
     appendProductEvent("Shopee creation already running", "Wait for the current product creation attempt to finish.", "warning");
     return;
   }
+  await ensureGeneratedCreateProductCommand("Preparing a clean-background image before Shopee fill.");
   const approvedCommands = state.createProductCommands.filter((command) =>
     command.kind === "create_product" &&
     (command.approvalStatus === "approved" || command.approvalStatus === "edited")
@@ -1900,10 +1952,14 @@ async function queueShopeeProductCreation(options = {}) {
       });
       state.productCreationFilled = Boolean(response?.ok);
       renderCommands();
+      const uploadEvidence = response?.evidence?.uploadedImages;
+      const uploadDetail = uploadEvidence?.count > 0
+        ? `images ${uploadEvidence.count}`
+        : `images 0${uploadEvidence?.diagnostic ? ` (${uploadEvidence.diagnostic})` : ""}`;
       appendProductEvent(
         response?.ok ? "Shopee form filled" : "Shopee fill failed",
         response?.ok
-          ? `${response.evidence?.filled?.join(", ") || "fields"}; images ${response.evidence?.uploadedImages?.count || 0}`
+          ? `${response.evidence?.filled?.join(", ") || "fields"}; ${uploadDetail}`
           : response?.error || response?.evidence?.error || response?.status || "Shopee did not accept the fill.",
         response?.ok ? "success" : "error"
       );

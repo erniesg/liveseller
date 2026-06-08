@@ -746,12 +746,6 @@ export const vintageJewelryProducts: ProductRecord[] = [
           "/assets/products/vintage-jewelry/blue-stone-bar-brooch-03.jpg",
           "Blue-green stone bar brooch clasp detail",
           "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (2).jpg"
-        ),
-        vintageImage(
-          "blue-stone-bar-brooch-04",
-          "/assets/products/vintage-jewelry/blue-stone-bar-brooch-04.jpg",
-          "Blue-green stone bar brooch styled with flowers",
-          "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (3).jpg"
         )
       ],
       videos: []
@@ -1075,7 +1069,8 @@ export const validOverlayState: OverlayState = {
     price: 19.9,
     currency: "SGD",
     stock: 42,
-    imageUri: "/assets/products/cooling-tee.jpg"
+    imageUri: "/assets/products/cooling-tee.jpg",
+    visible: true
   },
   promoBanner: {
     promoId: "promo-flash-10",

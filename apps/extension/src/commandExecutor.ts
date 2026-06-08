@@ -23,6 +23,11 @@ export type ExecutedProductCommand = {
   toolResult: ToolResult;
   command?: ShopeeCreateProductCommand;
   filledFields?: string[];
+  uploadedImages?: {
+    count: number;
+    fileNames: string[];
+    diagnostic?: string;
+  };
   submitted?: boolean;
 };
 
@@ -196,6 +201,61 @@ function writeField(
   return fieldName;
 }
 
+function imageDataUrl(image: { uri?: string } | undefined): string | undefined {
+  return typeof image?.uri === "string" && image.uri.startsWith("data:image/")
+    ? image.uri
+    : undefined;
+}
+
+function fileNameForImage(image: { id?: string; alt?: string } | undefined, index: number, mime: string): string {
+  const extension = mime.includes("png")
+    ? "png"
+    : mime.includes("webp")
+      ? "webp"
+      : "jpg";
+  const raw = String(image?.alt || image?.id || `liveseller-product-${index + 1}`)
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 70) || `liveseller-product-${index + 1}`;
+  return /\.[a-z0-9]{3,4}$/i.test(raw) ? raw : `${raw}.${extension}`;
+}
+
+function fileFromDataUrl(image: { id?: string; uri?: string; alt?: string } | undefined, index: number): File | undefined {
+  const dataUrl = imageDataUrl(image);
+  const [header, base64] = String(dataUrl || "").split(",");
+  if (!header?.startsWith("data:") || !base64 || typeof atob !== "function" || typeof File !== "function") {
+    return undefined;
+  }
+  const mime = header.match(/^data:([^;]+)/)?.[1] || "image/jpeg";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let byteIndex = 0; byteIndex < binary.length; byteIndex += 1) {
+    bytes[byteIndex] = binary.charCodeAt(byteIndex);
+  }
+  return new File([bytes], fileNameForImage(image, index, mime), { type: mime });
+}
+
+function uploadProductImages(
+  root: ParentNode,
+  images: Array<{ id?: string; uri?: string; alt?: string }>
+): ExecutedProductCommand["uploadedImages"] {
+  const files = images.map(fileFromDataUrl).filter((file): file is File => Boolean(file)).slice(0, 1);
+  if (files.length === 0) {
+    return { count: 0, fileNames: [], diagnostic: "no_image_data_url" };
+  }
+  const input = root.querySelector("input[type='file'][accept*='image'], input[type='file']");
+  if (!(input instanceof HTMLInputElement)) {
+    return { count: 0, fileNames: files.map((file) => file.name), diagnostic: "no_image_file_input" };
+  }
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: files
+  });
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  return { count: files.length, fileNames: files.map((file) => file.name) };
+}
+
 function compactText(value: string | null | undefined): string {
   return String(value ?? "").replace(/\s+/gu, " ").trim().toLowerCase();
 }
@@ -262,14 +322,35 @@ export function executeQueuedShopeeCreateProductCommand(
     writeField(root, [
       "[name='sku']",
       "input[placeholder*='sku' i]"
-    ], product.sku, "sku")
+    ], product.sku, "sku"),
+    writeField(root, [
+      "[name='weight']",
+      "input[placeholder*='weight' i]"
+    ], String(product.dimensions.weightGrams / 1000), "weight"),
+    writeField(root, [
+      "[name='length']",
+      "input[placeholder*='length' i]",
+      "input[placeholder*='l (integer)' i]"
+    ], String(product.dimensions.lengthCm), "parcelLength"),
+    writeField(root, [
+      "[name='width']",
+      "input[placeholder*='width' i]",
+      "input[placeholder*='w (integer)' i]"
+    ], String(product.dimensions.widthCm), "parcelWidth"),
+    writeField(root, [
+      "[name='height']",
+      "input[placeholder*='height' i]",
+      "input[placeholder*='h (integer)' i]"
+    ], String(product.dimensions.heightCm), "parcelHeight")
   ].filter((field): field is string => Boolean(field));
+  const uploadedImages = uploadProductImages(root, product.media.images);
 
   if (filledFields.length < 4) {
     return {
       toolResult: result(parsed.data.commandId, "failed", "Shopee product form selectors were not available"),
       command: parsed.data,
       filledFields,
+      uploadedImages,
       submitted: false
     };
   }
@@ -282,6 +363,7 @@ export function executeQueuedShopeeCreateProductCommand(
     toolResult: result(parsed.data.commandId, "applied"),
     command: parsed.data,
     filledFields,
+    uploadedImages,
     submitted
   };
 }

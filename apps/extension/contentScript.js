@@ -37,6 +37,9 @@
         // Some Shopee payloads use content as the plain text.
       }
     }
+    if (content && typeof content === "object" && content.type != null && content.type !== 101) {
+      return null;
+    }
     const text = normalizeText(
       typeof content === "object" && content
         ? content.content || content.content_v2 || content.text
@@ -69,10 +72,11 @@
     const className = String(item.className || "");
     const text = row.querySelector(".message-content_3bb92")?.textContent || "";
     const viewerName = row.querySelector(".user-name_2fad3")?.textContent || "";
+    const rowText = row.textContent || "";
     const isHost = className.includes("host-item") || Boolean(row.querySelector(".host-icon_3f8fa"));
     const isSystem = !viewerName ||
       className.includes("highlight-item") ||
-      /joined!|Welcome to Shopee Live/i.test(text);
+      /joined!?|followed the host|shared the live|liked|Welcome to Shopee Live/i.test(`${text} ${rowText}`);
     if (isSystem) return;
     sendViewerMessage({
       viewerId: viewerName || "shopee-viewer",

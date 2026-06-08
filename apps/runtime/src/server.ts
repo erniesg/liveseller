@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import {
+  type LanguageCode,
   type LiveSessionSpec,
   OverlayStateSchema,
   LiveSessionSpecSchema,
@@ -32,12 +33,14 @@ const sessionStores = new Map(
 );
 const sellerTimeline = createSellerTimelineStore();
 const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
+const DEFAULT_REALTIME_TRANSLATION_MODEL = "gpt-realtime-translate";
 
 type RealtimeAgentToolName =
   | "show_overlay_background"
   | "show_product_card"
   | "prompt_seller_script"
   | "emit_translation_caption"
+  | "emit_realtime_translation"
   | "send_policy_checked_reply";
 
 export type RealtimeAgentToolCall = {
@@ -150,6 +153,63 @@ export async function createRealtimeClientSecret(options: {
   };
 }
 
+export type RealtimeTranslationSessionResponse = {
+  status: number;
+  body: unknown;
+};
+
+export async function createRealtimeTranslationSession(options: {
+  apiKey?: string;
+  fetchImpl?: typeof fetch;
+  targetLanguage?: string;
+  model?: string;
+} = {}): Promise<RealtimeTranslationSessionResponse> {
+  const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return {
+      status: 503,
+      body: {
+        error: "openai_api_key_missing",
+        message: "Set OPENAI_API_KEY on the runtime server to use realtime audio translation."
+      }
+    };
+  }
+
+  const response = await (options.fetchImpl ?? fetch)(
+    "https://api.openai.com/v1/realtime/translations/client_secrets",
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        session: {
+          model: options.model ?? process.env.OPENAI_REALTIME_TRANSLATION_MODEL ?? DEFAULT_REALTIME_TRANSLATION_MODEL,
+          audio: {
+            output: {
+              language: options.targetLanguage ?? process.env.OPENAI_REALTIME_TRANSLATION_LANGUAGE ?? "en"
+            }
+          }
+        }
+      })
+    }
+  );
+
+  return {
+    status: response.status,
+    body: {
+      ...(await response.json()),
+      translation: {
+        model: options.model ?? process.env.OPENAI_REALTIME_TRANSLATION_MODEL ?? DEFAULT_REALTIME_TRANSLATION_MODEL,
+        targetLanguage: options.targetLanguage ?? process.env.OPENAI_REALTIME_TRANSLATION_LANGUAGE ?? "en",
+        callsEndpoint: "https://api.openai.com/v1/realtime/translations/calls",
+        overlayTool: "emit_realtime_translation"
+      }
+    }
+  };
+}
+
 function requireSessionStore(sessionId: string) {
   const store = sessionStores.get(sessionId);
   if (!store) {
@@ -184,6 +244,14 @@ function stringArg(args: Record<string, unknown>, key: string): string {
 function optionalStringArg(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function optionalLanguageArg(args: Record<string, unknown>, key: string, fallback: LanguageCode): LanguageCode {
+  const value = optionalStringArg(args, key);
+  if (value === "en" || value === "zh" || value === "ms" || value === "ta") {
+    return value;
+  }
+  return fallback;
 }
 
 export function executeRealtimeAgentToolCall(
@@ -268,6 +336,22 @@ export function executeRealtimeAgentToolCall(
       sessionId: snapshot.sessionId,
       overlayState: routed.overlayState,
       routed
+    };
+  }
+
+  if (call.name === "emit_realtime_translation") {
+    const overlayState = store.updateRealtimeTranslation({
+      sourceText: optionalStringArg(args, "sourceText"),
+      sourceLanguage: optionalLanguageArg(args, "sourceLanguage", "zh"),
+      translatedText: stringArg(args, "translatedText"),
+      targetLanguage: optionalLanguageArg(args, "targetLanguage", "en")
+    });
+    return {
+      status: "applied",
+      tool: call.name,
+      callId: call.callId,
+      sessionId: snapshot.sessionId,
+      overlayState
     };
   }
 
@@ -365,7 +449,7 @@ export async function createRealtimeAgentSession(input: {
             parameters: {
               type: "object",
               properties: {
-                mode: { type: "string", enum: ["solid", "default"] },
+                mode: { type: "string", enum: ["solid", "default", "kinetic", "off"] },
                 value: { type: "string" },
                 label: { type: "string" }
               },
@@ -416,6 +500,22 @@ export async function createRealtimeAgentSession(input: {
           },
           {
             type: "function",
+            name: "emit_realtime_translation",
+            description: "Write live source and translated captions emitted by the realtime translation stream.",
+            parameters: {
+              type: "object",
+              properties: {
+                sourceText: { type: "string" },
+                sourceLanguage: { type: "string", enum: ["en", "zh", "ms", "ta"] },
+                translatedText: { type: "string" },
+                targetLanguage: { type: "string", enum: ["en", "zh", "ms", "ta"] }
+              },
+              required: ["translatedText", "targetLanguage"],
+              additionalProperties: false
+            }
+          },
+          {
+            type: "function",
             name: "send_policy_checked_reply",
             description: "Send only low-risk structured replies; risky replies must ask seller approval first.",
             parameters: {
@@ -446,6 +546,7 @@ export async function createRealtimeAgentSession(input: {
         responsibilities: [
           "prompt_seller_script",
           "translate_host_speech_to_english_audio",
+          "emit_realtime_translation",
           "policy_checked_viewer_reply_tools",
           "product_overlay_tools",
           "overlay_background_tools"
@@ -1071,7 +1172,7 @@ function compositorPreviewHtml(req: import("node:http").IncomingMessage) {
   const base = runtimeOrigin(req);
   const url = new URL(req.url ?? "/camera-compositor/preview", base);
   const overlayUrl = url.searchParams.get("overlayUrl")
-    ?? `${base.replace(":8787", ":5180")}/?runtimeOrigin=${encodeURIComponent(base)}&sessionId=${encodeURIComponent(validLiveSessionSpec.sessionId)}&transparent=1`;
+    ?? `${base.replace(":8787", ":5180")}/display?runtimeOrigin=${encodeURIComponent(base)}&sessionId=${encodeURIComponent(validLiveSessionSpec.sessionId)}&transparent=1&camera=0`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -1169,8 +1270,8 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
   const sessionId = url.searchParams.get("sessionId") || vintageJewelryLiveSessionSpec.sessionId;
   const overlayOrigin = base.replace(":8787", ":5180");
   const publicOverlayUrl =
-    `${overlayOrigin}/?runtimeOrigin=${encodeURIComponent(base)}&sessionId=${encodeURIComponent(sessionId)}`;
-  const compositorOverlayUrl = `${publicOverlayUrl}&transparent=1`;
+    `${overlayOrigin}/display?runtimeOrigin=${encodeURIComponent(base)}&sessionId=${encodeURIComponent(sessionId)}`;
+  const compositorOverlayUrl = `${publicOverlayUrl}&transparent=1&camera=0`;
   const cameraPreviewUrl =
     `${base}/camera-compositor/preview?overlayUrl=${encodeURIComponent(compositorOverlayUrl)}`;
   return `<!doctype html>
@@ -1249,13 +1350,15 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
         <div class="two">
           <button id="change-bg" type="button">Change bg</button>
           <button id="start-agent" type="button">Start voice agent</button>
+          <button id="show-product-card" type="button">Show product card</button>
+          <button id="hide-product-card" type="button">Hide product card</button>
         </div>
         <label>Host speech / translation command
           <textarea id="host-text" rows="3">这枚中古胸针今天直播可以近看珐琅和贝母细节</textarea>
         </label>
         <button id="translate" type="button">Translate on overlay</button>
         <label>Viewer message
-          <textarea id="viewer-message" rows="3">Can ship to Singapore and how much is the cameo brooch?</textarea>
+          <textarea id="viewer-message" rows="3">How much is this and where do you ship from?</textarea>
         </label>
         <button id="reply-viewer" type="button">Policy-check reply</button>
       </section>
@@ -1379,6 +1482,17 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
       });
     }
 
+    async function setProductCardVisibility(visible) {
+      const result = await fetchJson("/api/overlay/" + encodeURIComponent(sessionId) + "/product-card-visibility", {
+        method: "POST",
+        body: JSON.stringify({ visible })
+      });
+      log(visible ? "Product card shown" : "Product card hidden", result.productCard?.title || "No product card", {
+        currentProductId: result.currentProductId,
+        productCardVisible: result.productCard?.visible !== false
+      });
+    }
+
     async function translateCaption() {
       await callTool("emit_translation_caption", {
         text: byId("host-text").value.trim(),
@@ -1448,13 +1562,13 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
 
     async function startVoiceAgent() {
       try {
-        const result = await fetchJson("/api/runtime/realtime/agent-session", {
+        const result = await fetchJson("/api/runtime/realtime/translation-session", {
           method: "POST",
-          body: JSON.stringify({ sessionId, voice: "marin" })
+          body: JSON.stringify({ sessionId, targetLanguage: "en" })
         });
         const secret = realtimeClientSecret(result);
         if (!secret) {
-          log("Realtime voice agent unavailable", result.error || "No ephemeral client secret returned.", {
+          log("Realtime translation unavailable", result.error || "No ephemeral client secret returned.", {
             status: "warning",
             redacted: true
           });
@@ -1462,8 +1576,25 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
         }
         const peer = new RTCPeerConnection();
         const channel = peer.createDataChannel("oai-events");
+        const sourceTranscript = { text: "" };
+        const translatedTranscript = { text: "" };
+        let overlayUpdateTimer;
+        function scheduleTranslationOverlayUpdate() {
+          clearTimeout(overlayUpdateTimer);
+          overlayUpdateTimer = setTimeout(() => {
+            if (!translatedTranscript.text.trim()) {
+              return;
+            }
+            void callTool("emit_realtime_translation", {
+              sourceText: sourceTranscript.text.trim() || undefined,
+              sourceLanguage: "zh",
+              translatedText: translatedTranscript.text.trim(),
+              targetLanguage: "en"
+            }).catch((error) => log("Realtime translation overlay failed", error.message, { status: "error" }));
+          }, 250);
+        }
         channel.addEventListener("open", () => {
-          log("Realtime voice agent connected", "Microphone audio is streaming; tool calls will update overlay/script/replies.", {
+          log("Realtime translation connected", "Microphone audio is streaming; translated audio and captions will update the public overlay.", {
             redacted: true
           });
         });
@@ -1490,18 +1621,31 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
               }).catch((error) => log("Realtime tool failed", error.message, { status: "error" }));
             }
           }
+          if (payload.type === "session.input_transcript.delta" && payload.delta) {
+            sourceTranscript.text += payload.delta;
+            byId("host-text").value = sourceTranscript.text.trim();
+            scheduleTranslationOverlayUpdate();
+          }
+          if (payload.type === "session.output_transcript.delta" && payload.delta) {
+            translatedTranscript.text += payload.delta;
+            scheduleTranslationOverlayUpdate();
+          }
           if (payload.type === "conversation.item.input_audio_transcription.completed" && payload.transcript) {
             handleVoiceCommand(payload.transcript);
           }
         });
+        peer.ontrack = ({ streams }) => {
+          const translatedAudio = new Audio();
+          translatedAudio.autoplay = true;
+          translatedAudio.srcObject = streams[0];
+        };
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         for (const track of stream.getTracks()) {
           peer.addTrack(track, stream);
         }
         const offer = await peer.createOffer();
         await peer.setLocalDescription(offer);
-        const model = result.session?.model || "gpt-realtime-2";
-        const response = await fetch("https://api.openai.com/v1/realtime?model=" + encodeURIComponent(model), {
+        const response = await fetch(result.translation?.callsEndpoint || "https://api.openai.com/v1/realtime/translations/calls", {
           method: "POST",
           headers: {
             authorization: "Bearer " + secret,
@@ -1510,7 +1654,7 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
           body: offer.sdp
         });
         if (!response.ok) {
-          throw new Error("Realtime WebRTC returned " + response.status);
+          throw new Error("Realtime translation WebRTC returned " + response.status);
         }
         await peer.setRemoteDescription({ type: "answer", sdp: await response.text() });
         window.livesellerRealtimePeer?.close?.();
@@ -1530,13 +1674,13 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
           recognition.start();
           window.livesellerSpeechRecognition = recognition;
         }
-        log("Realtime voice agent requested", "Mic connected and ready for voice commands/tool calls.", {
+        log("Realtime translation requested", "Mic connected for live translated audio and overlay captions.", {
           status: "success",
           clientSecretPresent: true,
           redacted: true
         });
       } catch (error) {
-        log("Realtime voice agent unavailable", error.message, { status: "warning", redacted: true });
+        log("Realtime translation unavailable", error.message, { status: "warning", redacted: true });
       }
     }
 
@@ -1596,6 +1740,8 @@ function sellerLiveControlHtml(req: import("node:http").IncomingMessage) {
     byId("go-live").addEventListener("click", () => void goLive().catch((error) => log("Go Live failed", error.message)));
     byId("stop-stream").addEventListener("click", () => void stopStream().catch((error) => log("Stop failed", error.message)));
     byId("change-bg").addEventListener("click", () => void changeBackground().catch((error) => log("Background change failed", error.message)));
+    byId("show-product-card").addEventListener("click", () => void setProductCardVisibility(true).catch((error) => log("Show product card failed", error.message)));
+    byId("hide-product-card").addEventListener("click", () => void setProductCardVisibility(false).catch((error) => log("Hide product card failed", error.message)));
     byId("translate").addEventListener("click", () => void translateCaption().catch((error) => log("Translation failed", error.message)));
     byId("reply-viewer").addEventListener("click", () => void replyViewer().catch((error) => log("Viewer reply failed", error.message)));
     byId("start-agent").addEventListener("click", () => void startVoiceAgent());
@@ -1795,6 +1941,27 @@ export function createRuntimeServer() {
           detail: session.status >= 200 && session.status < 300
             ? "Server minted an ephemeral client secret without exposing the OpenAI API key."
             : "Realtime client secret request failed; check runtime server OpenAI configuration.",
+          redacted: true
+        });
+        sendJson(res, session.status, session.body);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/runtime/realtime/translation-session") {
+        const body = await readJson(req);
+        const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
+        const session = await createRealtimeTranslationSession({
+          targetLanguage: typeof body.targetLanguage === "string" ? body.targetLanguage : undefined
+        });
+        sellerTimeline.append({
+          service: "runtime",
+          sessionId,
+          kind: "realtime",
+          status: session.status >= 200 && session.status < 300 ? "success" : "error",
+          title: "Realtime translation session requested",
+          detail: session.status >= 200 && session.status < 300
+            ? "Ephemeral realtime translation session is ready for the seller-private UI."
+            : "Realtime translation session failed; server-side OpenAI configuration may be missing.",
           redacted: true
         });
         sendJson(res, session.status, session.body);
@@ -2014,6 +2181,29 @@ export function createRuntimeServer() {
           status: "success",
           title: "Overlay background changed",
           detail: background.label,
+          redacted: false
+        });
+        sendJson(res, 200, next);
+        return;
+      }
+
+      const overlayProductCardVisibilitySessionId = sessionIdFromUrl(req.url, /^\/api\/overlay\/([^/]+)\/product-card-visibility$/u);
+      if (req.method === "POST" && overlayProductCardVisibilitySessionId) {
+        const store = sessionStores.get(overlayProductCardVisibilitySessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        const body = await readJson(req);
+        const visible = Boolean((body as { visible?: unknown }).visible);
+        const next = store.updateProductCardVisibility(visible);
+        sellerTimeline.append({
+          service: "runtime",
+          sessionId: overlayProductCardVisibilitySessionId,
+          kind: "overlay",
+          status: "success",
+          title: visible ? "Product card shown" : "Product card hidden",
+          detail: next.productCard?.title ?? "No product card",
           redacted: false
         });
         sendJson(res, 200, next);

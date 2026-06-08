@@ -36,7 +36,6 @@ const sellerDropFileNames = [
   "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风.jpg",
   "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (1).jpg",
   "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (2).jpg",
-  "新品又上一组。#中古饰品 #中古首饰 #中古首饰直播 #中古首饰vintage #中古风 (3).jpg",
   "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享.jpg",
   "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (1).jpg",
   "新鲜出炉的卡霉霉。#中古种草指南 #中古饰品 #中古首饰 #中古首饰vintage #中古首饰分享 (2).jpg",
@@ -143,13 +142,13 @@ describe("prep catalog brain", () => {
     const sellerDropFolder = createSellerDropFolderFixture();
     const assets = discoverSellerDropFolderAssets(sellerDropFolder);
 
-    expect(assets.images).toHaveLength(19);
+    expect(assets.images).toHaveLength(18);
     expect(assets.groups.map((group) => group.productId)).toEqual([
       "prod-vintage-gold-grape-leaf-brooch",
       "prod-vintage-blue-stone-bar-brooch",
       "prod-vintage-cameo-brooch"
     ]);
-    expect(assets.groups.map((group) => group.imageFiles.length)).toEqual([5, 4, 10]);
+    expect(assets.groups.map((group) => group.imageFiles.length)).toEqual([5, 3, 10]);
   });
 
   it("discovers arbitrary seller-drop products from product image citations", () => {
@@ -179,7 +178,7 @@ describe("prep catalog brain", () => {
     const result = buildSellerDropFolderExtraction(sellerDropFolder);
 
     expect(result.products).toHaveLength(3);
-    expect(result.assets.filter((asset) => asset.kind === "product_image")).toHaveLength(19);
+    expect(result.assets.filter((asset) => asset.kind === "product_image")).toHaveLength(18);
     expect(result.sellerGuidance).toHaveLength(3);
     expect(result.imageGenerationPlan).toHaveLength(3);
     expect(result.imageGenerationPlan.every((plan) => plan.model === "gpt-image-2")).toBe(true);

@@ -176,7 +176,7 @@ export function SellerConsole({
   const [backgroundValue, setBackgroundValue] = useState("#0f766e");
   const [lastActions, setLastActions] = useState<RuntimeRouteResponse["actions"]>([]);
   const [lastResult, setLastResult] = useState("Ready");
-  const [voiceAgentStatus, setVoiceAgentStatus] = useState("Realtime 2 voice agent not started");
+  const [voiceAgentStatus, setVoiceAgentStatus] = useState("Realtime translation not started");
   const [toolLog, setToolLog] = useState<string[]>([]);
   const [sellerScript, setSellerScript] = useState("");
   const [sellerMemory, setSellerMemory] = useState<SellerMemorySnapshot>();
@@ -185,9 +185,11 @@ export function SellerConsole({
   const publicOverlayUrl = useMemo(() => {
     const params = new URLSearchParams({
       runtimeOrigin,
-      sessionId
+      sessionId,
+      transparent: "1",
+      camera: "0"
     });
-    return `/?${params.toString()}`;
+    return `/display?${params.toString()}`;
   }, [runtimeOrigin, sessionId]);
   const sellerVisibleActions = lastActions.filter((action) =>
     ["send_reply", "draft_reply", "request_approval", "escalate"].includes(action.type)
@@ -306,20 +308,20 @@ export function SellerConsole({
   }
 
   async function startRealtimeAgent() {
-    const response = await fetchImpl(`${runtimeOrigin}/api/runtime/realtime/agent-session`, {
+    const response = await fetchImpl(`${runtimeOrigin}/api/runtime/realtime/translation-session`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         sessionId,
-        voice: "marin"
+        targetLanguage: "en"
       })
     });
     if (!response.ok) {
-      throw new Error(`Realtime agent session returned ${response.status}`);
+      throw new Error(`Realtime translation session returned ${response.status}`);
     }
     await response.json();
-    setVoiceAgentStatus("Realtime 2 voice agent ready");
-    setToolLog((entries) => ["Realtime 2 voice agent ready: microphone/WebRTC session can call overlay tools.", ...entries].slice(0, 6));
+    setVoiceAgentStatus("Realtime translation ready");
+    setToolLog((entries) => ["Realtime translation ready: server-owned ephemeral session can stream mic translation.", ...entries].slice(0, 6));
   }
 
   async function startShow() {
@@ -388,11 +390,25 @@ export function SellerConsole({
     });
   }
 
+  async function setProductCardVisibility(visible: boolean) {
+    const response = await fetchImpl(`${runtimeOrigin}/api/overlay/${sessionId}/product-card-visibility`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ visible })
+    });
+    if (!response.ok) {
+      throw new Error(`Product card visibility returned ${response.status}`);
+    }
+    const nextState = OverlayStateSchema.parse(await response.json());
+    setOverlayState(nextState);
+    setLastResult(visible ? "Product card shown" : "Product card hidden");
+  }
+
   return (
     <main className="seller-console-shell" aria-label="LiveSeller seller console">
       <header className="seller-console-header">
         <div>
-          <p className="seller-console-kicker">Seller test console</p>
+          <p className="seller-console-kicker">Seller control</p>
           <h1>{session.title}</h1>
           <p>{session.sessionId}</p>
           <p aria-label="Public overlay source">{publicOverlayUrl}</p>
@@ -440,12 +456,12 @@ export function SellerConsole({
           </div>
         </section>
 
-        <section className="seller-panel" aria-label="Video overlay test controls">
+        <section className="seller-panel" aria-label="Video overlay controls">
           <div className="seller-panel-heading">
             <h2>Video overlay</h2>
             <div className="seller-heading-actions">
               <button type="button" onClick={() => void startRealtimeAgent().catch((error) => setVoiceAgentStatus(error.message))}>
-                Start Realtime 2 voice agent
+                Start realtime translation
               </button>
               <button type="button" onClick={() => void syncOverlay().then(() => setStatus("live")).catch(() => setStatus("error"))}>
                 Sync
@@ -507,7 +523,15 @@ export function SellerConsole({
         <section className="seller-panel overlay-preview-panel" aria-label="Current overlay state">
           <div className="seller-panel-heading">
             <h2>Overlay state</h2>
-            <span>{lastResult}</span>
+            <div className="seller-heading-actions">
+              <button type="button" onClick={() => void setProductCardVisibility(true).catch((error) => setLastResult(error.message))}>
+                Show card
+              </button>
+              <button type="button" onClick={() => void setProductCardVisibility(false).catch((error) => setLastResult(error.message))}>
+                Hide card
+              </button>
+              <span>{lastResult}</span>
+            </div>
           </div>
           <div className="seller-overlay-preview">
             {overlayState?.productCard ? (
@@ -515,6 +539,7 @@ export function SellerConsole({
                 <img src={overlayState.productCard.imageUri} alt="" />
                 <h3>{overlayState.productCard.title}</h3>
                 <p>{overlayState.productCard.currency} {overlayState.productCard.price.toFixed(2)} · {overlayState.productCard.stock} left</p>
+                <p>{overlayState.productCard.visible === false ? "Hidden on public overlay" : "Visible on public overlay"}</p>
               </>
             ) : null}
             {overlayState?.caption.visible ? <blockquote>{overlayState.caption.text}</blockquote> : null}

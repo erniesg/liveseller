@@ -41,6 +41,57 @@ function actionId(event: RuntimeEvent, type: string): string {
   return `${event.eventId}-${type}`;
 }
 
+function productMentionedByText(text: string, session: LiveSessionSpec): ProductRecord | undefined {
+  const normalized = text.toLowerCase();
+  const direct = session.products.find((candidate) => {
+    const aliases = [candidate.title, candidate.sku, ...candidate.aliases];
+    return aliases.some((alias) => normalized.includes(alias.toLowerCase()));
+  });
+  if (direct) {
+    return direct;
+  }
+  const tokens = new Set(
+    normalized
+      .split(/[^a-z0-9\u4e00-\u9fff]+/iu)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3)
+  );
+  if (tokens.size === 0) {
+    return undefined;
+  }
+  const ranked = session.products
+    .map((candidate) => {
+      const productTokens = [candidate.title, candidate.sku, ...candidate.aliases]
+        .join(" ")
+        .toLowerCase()
+        .split(/[^a-z0-9\u4e00-\u9fff]+/iu)
+        .filter((token) => token.length >= 3);
+      const matched = productTokens.filter((token) => tokens.has(token));
+      return { candidate, score: new Set(matched).size };
+    })
+    .filter((match) => match.score >= 2)
+    .sort((left, right) => right.score - left.score);
+  return ranked[0]?.candidate;
+}
+
+function resolveEventProduct(
+  event: RuntimeEvent,
+  session: LiveSessionSpec,
+  currentProductId?: string
+): ProductRecord {
+  if ((event.type === "viewer_chat" || event.type === "product_switch") && event.payload.productId) {
+    const explicitProduct = session.products.find((candidate) => candidate.id === event.payload.productId);
+    if (explicitProduct) {
+      return explicitProduct;
+    }
+  }
+  const text =
+    event.type === "viewer_chat" || event.type === "host_transcript" ? event.payload.text : "";
+  return productMentionedByText(text, session) ??
+    (currentProductId ? session.products.find((candidate) => candidate.id === currentProductId) : undefined) ??
+    resolveProduct(text, session);
+}
+
 export function buildContextEnvelope(
   event: RuntimeEvent,
   session: LiveSessionSpec,
@@ -51,11 +102,7 @@ export function buildContextEnvelope(
     currentPromoId?: string;
   } = {}
 ): ContextEnvelope {
-  const text =
-    event.type === "viewer_chat" || event.type === "host_transcript" ? event.payload.text : "";
-  const product = event.type === "product_switch"
-    ? session.products.find((candidate) => candidate.id === event.payload.productId) ?? firstProduct(session)
-    : resolveProduct(text, session);
+  const product = resolveEventProduct(event, session, memory.currentProductId);
   const promo = session.promos[0];
   const policyDecision = event.type === "viewer_chat" ? classifyViewerMessage(event.payload.text) : undefined;
 
@@ -63,7 +110,7 @@ export function buildContextEnvelope(
     contextId: `ctx-${event.eventId}`,
     event,
     session,
-    currentProductId: memory.currentProductId ?? product.id,
+    currentProductId: product.id,
     currentPromoId: memory.currentPromoId ?? promo?.id,
     viewerMemory: memory.viewerMemory,
     sessionMemory: memory.sessionMemory ?? {
@@ -167,10 +214,14 @@ function decideViewerChatActions(context: ContextEnvelope): LiveAction[] {
   }
 
   const session = context.session;
-  const product = resolveProduct(event.payload.text, session);
+  const product = resolveEventProduct(event, session, context.currentProductId);
   const language = detectLanguage(event.payload.text, event.payload.language);
   const decision = classifyViewerMessage(event.payload.text);
   const citations = findRelevantCitations(product, session);
+
+  if (decision.behavior === "ignore") {
+    return [];
+  }
 
   if (decision.behavior === "send_reply") {
     return [

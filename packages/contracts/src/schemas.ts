@@ -686,7 +686,8 @@ export const ViewerChatEventSchema = RuntimeEventBaseSchema.extend({
       viewerId: z.string().min(1),
       viewerName: z.string().min(1),
       text: z.string().min(1),
-      language: LanguageCodeSchema.optional()
+      language: LanguageCodeSchema.optional(),
+      productId: z.string().min(1).optional()
     })
     .strict()
 });
@@ -1169,7 +1170,8 @@ export const OverlayStateSchema = z
         price: z.number().nonnegative(),
         currency: CurrencySchema,
         stock: z.number().int().nonnegative(),
-        imageUri: z.string().min(1)
+        imageUri: z.string().min(1),
+        visible: z.boolean().optional()
       })
       .strict()
       .optional(),
@@ -1191,7 +1193,7 @@ export const OverlayStateSchema = z
       .strict(),
     background: z
       .object({
-        mode: z.enum(["default", "solid", "image"]),
+        mode: z.enum(["default", "solid", "image", "kinetic", "off"]),
         value: z.string().min(1),
         label: z.string().min(1)
       })

@@ -152,9 +152,10 @@ export function extractViewerMessage(row: Element): CapturedViewerMessage | null
   const shopeeViewerName = row.querySelector(".user-name_2fad3")?.textContent?.trim();
   const shopeeItem = row.querySelector("[class*='item_']") ?? row;
   const shopeeClassName = String((shopeeItem as HTMLElement).className ?? "");
+  const shopeeRowText = row.textContent?.trim() ?? "";
   const isSystemRow = !shopeeViewerName ||
     shopeeClassName.includes("highlight-item") ||
-    /joined!|Welcome to Shopee Live/i.test(shopeeText ?? "");
+    /joined!?|followed the host|shared the live|liked|Welcome to Shopee Live/i.test(`${shopeeText ?? ""} ${shopeeRowText}`);
 
   if (!shopeeText || isSystemRow) {
     return null;
@@ -211,6 +212,18 @@ function firstString(value: unknown, paths: string[][]): string | undefined {
   return undefined;
 }
 
+function normalizeShopeeContent(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : value;
+  } catch {
+    return value;
+  }
+}
+
 function slug(value: string): string {
   const cleaned = value
     .trim()
@@ -225,6 +238,17 @@ export function normalizeReceiveNormalUserMessagePayload(
   sessionId: string,
   timestamp = new Date().toISOString()
 ): RuntimeEvent {
+  const root = asRecord(payload);
+  const normalizedPayload = root && "content" in root
+    ? {
+        ...root,
+        content: normalizeShopeeContent(root.content)
+      }
+    : payload;
+  const contentRecord = asRecord(asRecord(normalizedPayload)?.content);
+  if (contentRecord?.type != null && contentRecord.type !== 101) {
+    throw new Error("receiveNormalUserMessage payload is not a normal text chat message");
+  }
   const viewerId = firstString(payload, [
     ["viewerId"],
     ["userId"],
@@ -244,15 +268,19 @@ export function normalizeReceiveNormalUserMessagePayload(
     ["nickName"],
     ["nick_name"],
     ["displayName"],
+    ["display_name"],
     ["sender", "nickname"],
     ["sender", "nickName"],
     ["user", "nickname"],
     ["data", "nickname"],
     ["data", "nickName"]
   ]);
-  const text = firstString(payload, [
+  const text = firstString(normalizedPayload, [
     ["text"],
     ["content"],
+    ["content", "content"],
+    ["content", "content_v2"],
+    ["content", "text"],
     ["message"],
     ["msg"],
     ["messageContent"],

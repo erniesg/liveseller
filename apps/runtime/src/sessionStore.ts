@@ -38,7 +38,14 @@ export type RuntimeSessionStore = {
   snapshot(): RuntimeSessionStoreSnapshot;
   summary(): ReturnType<ReturnType<typeof createStreamAccumulator>["snapshot"]>;
   overlay(): OverlayState;
+  updateRealtimeTranslation(input: {
+    sourceText?: string;
+    sourceLanguage: OverlayState["caption"]["language"];
+    translatedText: string;
+    targetLanguage: OverlayState["caption"]["language"];
+  }): OverlayState;
   updateOverlayBackground(background: NonNullable<OverlayState["background"]>): OverlayState;
+  updateProductCardVisibility(visible: boolean): OverlayState;
 };
 
 function now(): string {
@@ -207,10 +214,48 @@ export function createRuntimeSessionStore(session: LiveSessionSpec): RuntimeSess
       return overlayState;
     },
 
+    updateRealtimeTranslation(input) {
+      overlayState = OverlayStateSchema.parse({
+        ...overlayState,
+        caption: input.sourceText
+          ? {
+              text: input.sourceText,
+              language: input.sourceLanguage,
+              visible: true
+            }
+          : overlayState.caption,
+        translatedCaptions: [
+          ...overlayState.translatedCaptions.filter(
+            (caption) => caption.language !== input.targetLanguage
+          ),
+          {
+            language: input.targetLanguage,
+            text: input.translatedText
+          }
+        ],
+        updatedAt: now()
+      });
+      return overlayState;
+    },
+
     updateOverlayBackground(background) {
       overlayState = OverlayStateSchema.parse({
         ...overlayState,
         background,
+        updatedAt: now()
+      });
+      return overlayState;
+    },
+
+    updateProductCardVisibility(visible) {
+      overlayState = OverlayStateSchema.parse({
+        ...overlayState,
+        productCard: overlayState.productCard
+          ? {
+              ...overlayState.productCard,
+              visible
+            }
+          : undefined,
         updatedAt: now()
       });
       return overlayState;

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import {
   type LanguageCode,
   type LiveSessionSpec,
+  type ProductRecord,
   type RuntimeEvent,
   LiveActionSchema,
   LiveSessionSpecSchema,
@@ -32,6 +33,7 @@ import { createRuntimeSessionStore } from "../src/sessionStore";
 import {
   createRealtimeClientSecret,
   createRealtimeAgentSession,
+  createRealtimeTranslationSession,
   executeRealtimeAgentToolCall,
   loadRuntimeEnvFile,
   getRuntimeCameraCompositorStatus,
@@ -57,6 +59,58 @@ function viewerEvent(text: string, language?: LanguageCode): RuntimeEvent {
       language: language as "en" | "zh" | "ms" | "ta" | undefined
     }
   };
+}
+
+function showaPeacockSessionSpec(): LiveSessionSpec {
+  const showaRing = {
+    ...vintageJewelryLiveSessionSpec.products[0]!,
+    id: "prod-showa-vintage-ring",
+    sku: "LS-VJ-SHOWA-RING-001",
+    title: "Showa Vintage Ring",
+    aliases: ["showa ring", "vintage ring", "ring", "昭和戒指"],
+    price: 168,
+    variants: [
+      {
+        ...vintageJewelryLiveSessionSpec.products[0]!.variants[0]!,
+        id: "showa-ring-one-size",
+        name: "Showa ring / One size",
+        sku: "LS-VJ-SHOWA-RING-001-OS",
+        stock: 1
+      }
+    ],
+    stock: 1
+  } satisfies ProductRecord;
+  const peacockBrooch = {
+    ...vintageJewelryLiveSessionSpec.products[1]!,
+    id: "prod-peacock-brooch",
+    sku: "LS-VJ-PEACOCK-002",
+    title: "Vintage Peacock Brooch",
+    aliases: ["peacock brooch", "peacock", "peacock pin", "孔雀胸针"],
+    price: 128,
+    variants: [
+      {
+        ...vintageJewelryLiveSessionSpec.products[1]!.variants[0]!,
+        id: "peacock-brooch-one-size",
+        name: "Peacock brooch / One size",
+        sku: "LS-VJ-PEACOCK-002-OS",
+        stock: 1
+      }
+    ],
+    stock: 1
+  } satisfies ProductRecord;
+
+  return LiveSessionSpecSchema.parse({
+    ...vintageJewelryLiveSessionSpec,
+    products: [showaRing, peacockBrooch],
+    promos: vintageJewelryLiveSessionSpec.promos.map((promo) => ({
+      ...promo,
+      eligibleProductIds: [showaRing.id, peacockBrooch.id]
+    })),
+    retrievalRefs: vintageJewelryLiveSessionSpec.retrievalRefs.map((ref) => ({
+      ...ref,
+      productIds: [showaRing.id, peacockBrooch.id]
+    }))
+  });
 }
 
 describe("live brain policy runtime", () => {
@@ -106,6 +160,102 @@ describe("live brain policy runtime", () => {
       expect(publicReply?.risk).toBe("low");
       expect(publicReply?.requiresApproval).toBe(false);
       expect(() => LiveActionSchema.parse(publicReply)).not.toThrow();
+    }
+  });
+
+  it("answers safe product size questions from structured dimensions", () => {
+    const event = viewerEvent("what size and weight is the Bamboo Cooling Tee?", "en");
+    const actions = decideActions(buildContextEnvelope(event, validLiveSessionSpec));
+    const publicReply = actions.find((action) => action.type === "send_reply");
+
+    expect(publicReply).toBeDefined();
+    expect(publicReply?.requiresApproval).toBe(false);
+    expect(publicReply?.payload.kind).toBe("send_reply");
+    if (publicReply?.payload.kind === "send_reply") {
+      expect(publicReply.payload.text).toContain("28 x 22 x 2 cm");
+      expect(publicReply.payload.text).toContain("180g");
+    }
+  });
+
+  it("answers generic shipping destination questions without inventing overseas coverage", () => {
+    const event = viewerEvent("where do you ship to?", "en");
+    const actions = decideActions(buildContextEnvelope(event, vintageJewelryLiveSessionSpec));
+    const publicReply = actions.find((action) => action.type === "send_reply");
+
+    expect(publicReply?.payload.kind).toBe("send_reply");
+    if (publicReply?.payload.kind === "send_reply") {
+      expect(publicReply.payload.text).toContain("Singapore local delivery");
+      expect(publicReply.payload.text).toContain("ship from Singapore");
+      expect(publicReply.payload.text).not.toContain("international");
+    }
+  });
+
+  it("does not answer greetings or viewer reactions with product prices", () => {
+    for (const text of ["Hiiii", "BUY BUY BUY", "🔥🔥🔥"]) {
+      const event = viewerEvent(text, "en");
+      const actions = decideActions(buildContextEnvelope(event, vintageJewelryLiveSessionSpec));
+
+      expect(actions.some((action) => action.type === "send_reply")).toBe(false);
+    }
+  });
+
+  it("answers generic and explicit jewelry questions against the right current product", () => {
+    const session = showaPeacockSessionSpec();
+    const store = createRuntimeSessionStore(session);
+    const peacock = session.products.find((product) => product.id === "prod-peacock-brooch")!;
+    const showaRing = session.products.find((product) => product.id === "prod-showa-vintage-ring")!;
+
+    store.route({
+      eventId: "event-show-peacock",
+      sessionId: session.sessionId,
+      timestamp: "2026-06-06T02:01:00.000Z",
+      source: "seller",
+      type: "product_switch",
+      payload: { productId: peacock.id }
+    });
+
+    const genericReply = store.route({
+      eventId: "event-this-price-ship",
+      sessionId: session.sessionId,
+      timestamp: "2026-06-06T02:02:00.000Z",
+      source: "viewer",
+      type: "viewer_chat",
+      payload: {
+        viewerId: "viewer-this",
+        viewerName: "This Buyer",
+        text: "How much is this and where do you ship from?",
+        language: "en"
+      }
+    }).actions.find((action) => action.type === "send_reply");
+
+    expect(genericReply?.payload.kind).toBe("send_reply");
+    if (genericReply?.payload.kind === "send_reply") {
+      expect(genericReply.payload.productId).toBe(peacock.id);
+      expect(genericReply.payload.text).toContain("Vintage Peacock Brooch");
+      expect(genericReply.payload.text).toContain("SGD 128.00");
+      expect(genericReply.payload.text).toContain("Singapore local delivery");
+      expect(genericReply.payload.text).toContain("ship from Singapore");
+    }
+
+    const explicitReply = store.route({
+      eventId: "event-showa-ring-price",
+      sessionId: session.sessionId,
+      timestamp: "2026-06-06T02:03:00.000Z",
+      source: "viewer",
+      type: "viewer_chat",
+      payload: {
+        viewerId: "viewer-ring",
+        viewerName: "Ring Buyer",
+        text: "How much is the Showa ring?",
+        language: "en"
+      }
+    }).actions.find((action) => action.type === "send_reply");
+
+    expect(explicitReply?.payload.kind).toBe("send_reply");
+    if (explicitReply?.payload.kind === "send_reply") {
+      expect(explicitReply.payload.productId).toBe(showaRing.id);
+      expect(explicitReply.payload.text).toContain("Showa Vintage Ring");
+      expect(explicitReply.payload.text).toContain("SGD 168.00");
     }
   });
 
@@ -322,10 +472,62 @@ describe("live brain policy runtime", () => {
         "show_product_card",
         "prompt_seller_script",
         "emit_translation_caption",
+        "emit_realtime_translation",
         "send_policy_checked_reply"
       ])
     );
     expect(JSON.stringify(session)).not.toMatch(/server-test-key|sk-/i);
+  });
+
+  it("creates server-owned realtime translation sessions for browser microphone audio", async () => {
+    const requests: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({ input, init });
+      return new Response(
+        JSON.stringify({
+          client_secret: {
+            value: "ephemeral-translation-secret"
+          }
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    });
+
+    const session = await createRealtimeTranslationSession({
+      apiKey: "server-test-key",
+      fetchImpl: fetchImpl as typeof fetch,
+      targetLanguage: "en"
+    });
+
+    expect(session.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/realtime/translations/client_secrets",
+      expect.objectContaining({ method: "POST" })
+    );
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body).toMatchObject({
+      session: {
+        model: "gpt-realtime-translate",
+        audio: {
+          output: {
+            language: "en"
+          }
+        }
+      }
+    });
+    expect(session.body).toMatchObject({
+      client_secret: {
+        value: "ephemeral-translation-secret"
+      },
+      translation: {
+        callsEndpoint: "https://api.openai.com/v1/realtime/translations/calls",
+        overlayTool: "emit_realtime_translation"
+      }
+    });
+    expect(JSON.stringify(requests[0]?.init?.body)).not.toContain("server-test-key");
   });
 
   it("executes realtime agent tool calls against overlay and policy runtime state", async () => {
@@ -396,6 +598,34 @@ describe("live brain policy runtime", () => {
     expect(captionResult.routed?.actions.map((action) => action.type)).toEqual(
       expect.arrayContaining(["update_caption", "emit_translation"])
     );
+
+    const realtimeTranslationResult = executeRealtimeAgentToolCall(store, {
+      callId: "call-live-translation",
+      name: "emit_realtime_translation",
+      arguments: {
+        sourceText: "这枚胸针今天只有一枚",
+        sourceLanguage: "zh",
+        translatedText: "There is only one brooch available today.",
+        targetLanguage: "en"
+      }
+    });
+    expect(realtimeTranslationResult).toMatchObject({
+      status: "applied",
+      tool: "emit_realtime_translation",
+      overlayState: {
+        caption: {
+          text: "这枚胸针今天只有一枚",
+          language: "zh",
+          visible: true
+        },
+        translatedCaptions: expect.arrayContaining([
+          {
+            language: "en",
+            text: "There is only one brooch available today."
+          }
+        ])
+      }
+    });
 
     const replyResult = executeRealtimeAgentToolCall(store, {
       callId: "call-reply",
@@ -704,6 +934,17 @@ describe("live brain policy runtime", () => {
       expect(response.status).toBe(200);
       expect(body.sessionId).toBe(validLiveSessionSpec.sessionId);
       expect(body.productCard.productId).toBe(validLiveSessionSpec.products[0]!.id);
+      expect(body.productCard.visible).toBe(false);
+      expect(body.caption).toMatchObject({
+        text: "",
+        visible: false
+      });
+      expect(body.translatedCaptions).toEqual([]);
+      expect(body.promoBanner).toBeUndefined();
+      expect(body.background).toMatchObject({
+        mode: "off",
+        value: "off"
+      });
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
@@ -746,6 +987,47 @@ describe("live brain policy runtime", () => {
       expect(overlay.background).toMatchObject({
         mode: "solid",
         value: "#0f766e"
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
+  it("toggles the public product card while keeping current product context", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const origin = `http://127.0.0.1:${address.port}`;
+      const hide = await fetch(`${origin}/api/overlay/${validLiveSessionSpec.sessionId}/product-card-visibility`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ visible: false })
+      });
+      const hidden = await hide.json();
+      expect(hide.status).toBe(200);
+      expect(hidden.currentProductId).toBe(validLiveSessionSpec.products[0]!.id);
+      expect(hidden.productCard).toMatchObject({
+        productId: validLiveSessionSpec.products[0]!.id,
+        visible: false
+      });
+
+      const show = await fetch(`${origin}/api/overlay/${validLiveSessionSpec.sessionId}/product-card-visibility`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ visible: true })
+      });
+      const shown = await show.json();
+      expect(show.status).toBe(200);
+      expect(shown.productCard).toMatchObject({
+        productId: validLiveSessionSpec.products[0]!.id,
+        visible: true
       });
     } finally {
       await new Promise<void>((resolve, reject) => {
@@ -839,6 +1121,7 @@ describe("live brain policy runtime", () => {
       const overlayResponse = await fetch(`${origin}/api/overlay/${vintageJewelryLiveSessionSpec.sessionId}`);
       const overlay = await overlayResponse.json();
       expect(overlay.productCard.productId).toBe(productId);
+      expect(overlay.productCard.visible).toBe(true);
       expect(overlay.productCard.imageUri).toContain("vintage-jewelry");
     } finally {
       await new Promise<void>((resolve, reject) => {
@@ -1568,6 +1851,11 @@ describe("live brain policy runtime", () => {
       expect(html).toContain("video.videoWidth");
       expect(html).toContain("prefix + \" \" + width + \"x\" + height + \" (live)\"");
       expect(html).toContain(overlayUrl.replaceAll("&", "&amp;"));
+
+      const defaultResponse = await fetch(`http://127.0.0.1:${address.port}/camera-compositor/preview`);
+      const defaultHtml = await defaultResponse.text();
+      expect(defaultHtml).toContain("/display?runtimeOrigin=");
+      expect(defaultHtml).toContain("transparent=1&amp;camera=0");
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
@@ -1597,12 +1885,18 @@ describe("live brain policy runtime", () => {
       expect(html).toContain("Camera + AI overlays");
       expect(html).toContain(vintageJewelryLiveSessionSpec.sessionId);
       expect(html).toContain("/camera-compositor/preview");
+      expect(html).toContain("/display?runtimeOrigin=");
       expect(html).toContain("transparent%3D1");
+      expect(html).toContain("camera%3D0");
       expect(html).toContain("/api/runtime/realtime/tool-call");
       expect(html).toContain("show_product_card");
       expect(html).toContain("prompt_seller_script");
       expect(html).toContain("emit_translation_caption");
       expect(html).toContain("send_policy_checked_reply");
+      expect(html).toContain("Show product card");
+      expect(html).toContain("Hide product card");
+      expect(html).toContain("/product-card-visibility");
+      expect(html).toContain("How much is this and where do you ship from?");
       expect(html).toContain("/api/shopee/runtime-compositor/start");
       expect(html).toContain("/api/test-stream/start");
       expect(html).toContain("present_redacted");
@@ -1624,6 +1918,7 @@ describe("live brain policy runtime", () => {
     });
 
     const result = await startLocalTestStream({
+      sessionId: validLiveSessionSpec.sessionId,
       origin: "http://127.0.0.1:8787",
       overlayUrl: "http://127.0.0.1:5180/?sessionId=live-vintage-jewelry-001&transparent=1",
       sellerPreviewUrl: "http://127.0.0.1:8787/camera-compositor/preview",
@@ -1636,7 +1931,7 @@ describe("live brain policy runtime", () => {
     expect(result.status).toBe("started_local_test_stream");
     expect(result.viewerUrl).toContain("/test-stream/");
     expect(result.hlsUrl).toContain("/index.m3u8");
-    expect(result.rtmpUrl).toBeUndefined();
+    expect("rtmpUrl" in result).toBe(false);
     expect(JSON.stringify(result)).not.toContain("rtmp://");
     expect(spawnImpl).toHaveBeenCalledWith(
       "ffmpeg",

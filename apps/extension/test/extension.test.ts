@@ -24,6 +24,7 @@ import {
   extractViewerMessage,
   handleReceiveNormalUserMessage,
   installReceiveNormalUserMessageHook,
+  normalizeReceiveNormalUserMessagePayload,
   renderCodexOperatorEvents,
   renderProductReviewPlan,
   renderSellerUiPolicy,
@@ -92,10 +93,32 @@ describe("Shopee extension command safety", () => {
       <input name="price" />
       <input name="stock" />
       <input name="sku" />
+      <input placeholder="Weight" />
+      <input placeholder="Length" />
+      <input placeholder="Width" />
+      <input placeholder="Height" />
+      <input type="file" accept="image/*" />
       <button type="button">Save and Publish</button>
     `;
+    const commandWithGeneratedImage = {
+      ...validShopeeCreateProductCommand,
+      payload: {
+        product: {
+          ...validShopeeCreateProductCommand.payload.product,
+          media: {
+            ...validShopeeCreateProductCommand.payload.product.media,
+            images: [
+              {
+                ...validShopeeCreateProductCommand.payload.product.media.images[0]!,
+                uri: "data:image/png;base64,Z2VuZXJhdGVkLXByb2R1Y3QtaW1hZ2U="
+              }
+            ]
+          }
+        }
+      }
+    };
 
-    const result = executeQueuedShopeeCreateProductCommand(validShopeeCreateProductCommand, document);
+    const result = executeQueuedShopeeCreateProductCommand(commandWithGeneratedImage, document);
 
     expect(result.toolResult.status).toBe("applied");
     expect((document.querySelector("input[placeholder*='Brand Name']") as HTMLInputElement).value)
@@ -106,6 +129,12 @@ describe("Shopee extension command safety", () => {
       .toBe(String(validShopeeCreateProductCommand.payload.product.price));
     expect((document.querySelector("input[name='stock']") as HTMLInputElement).value)
       .toBe(String(validShopeeCreateProductCommand.payload.product.stock));
+    expect((document.querySelector("input[placeholder='Weight']") as HTMLInputElement).value).toBe("0.18");
+    expect((document.querySelector("input[placeholder='Length']") as HTMLInputElement).value).toBe("28");
+    expect((document.querySelector("input[placeholder='Width']") as HTMLInputElement).value).toBe("22");
+    expect((document.querySelector("input[placeholder='Height']") as HTMLInputElement).value).toBe("2");
+    expect(result.uploadedImages?.count).toBe(1);
+    expect(result.uploadedImages?.fileNames[0]).toMatch(/Bamboo-Cooling-Tee/i);
     expect(result.submitted).toBe(false);
   });
 
@@ -288,6 +317,34 @@ describe("Shopee extension command safety", () => {
     uninstall();
     page.receiveNormalUserMessage(payload);
     expect(capturedPayloads).toEqual([payload]);
+  });
+
+  it("normalizes Shopee receiveNormalUserMessage JSON text payloads and rejects system events", () => {
+    const normal = normalizeReceiveNormalUserMessagePayload(
+      {
+        uid: 123,
+        nickname: "buyer",
+        content: JSON.stringify({ type: 101, content: "ship to Singapore?" })
+      },
+      validLiveSessionSpec.sessionId,
+      "2026-06-06T02:00:00.000Z"
+    );
+    expect(normal.payload).toMatchObject({
+      viewerId: "123",
+      viewerName: "buyer",
+      text: "ship to Singapore?"
+    });
+    expect(() =>
+      normalizeReceiveNormalUserMessagePayload(
+        {
+          uid: 123,
+          nickname: "buyer",
+          content: JSON.stringify({ type: 202, content: "joined" })
+        },
+        validLiveSessionSpec.sessionId,
+        "2026-06-06T02:00:00.000Z"
+      )
+    ).toThrow("not a normal text chat message");
   });
 
   it("posts Shopee viewer messages to runtime and renders returned action evidence", async () => {
@@ -563,6 +620,9 @@ describe("Shopee extension command safety", () => {
     expect(sidePanelScript).toContain("Retry creating approved products");
     expect(sidePanelScript).toContain("Shopee creation retry started");
     expect(sidePanelScript).toContain("Create command rebuild started");
+    expect(sidePanelScript).toContain("ensureGeneratedCreateProductCommand");
+    expect(sidePanelScript).toContain("createProductCommandUsesGeneratedImage");
+    expect(sidePanelScript).toContain("Clean product image generation started");
     expect(sidePanelScript).toContain("productCreationInFlight");
     expect(sidePanelScript).toContain("Shopee creation already running");
     expect(sidePanelScript).toContain("Creating the first product only");
@@ -683,12 +743,39 @@ describe("Shopee extension command safety", () => {
     expect(background).toContain("liveseller:confirm-product-publish");
     expect(background).toContain("fillShopeeProductDraft");
     expect(background).toContain("selectShopeeProductCategory");
+    expect(background).toContain("findExistingShopeeProductCreationTab");
+    expect(background).toContain("seller.shopee.sg/portal/product/new");
+    expect(background).toContain("create product tab isolated from livestream monitoring");
+    expect(background).toContain("edu/home");
+    expect(background).toContain("ensureShopeeProductCreationTabReady");
+    expect(background).toContain("runShopeeProductStep");
+    expect(background).toContain("product_form_not_ready");
+    expect(background).toContain("product_form_incomplete");
+    expect(background).toContain("product.dimensions");
     expect(background).toContain(".product-category-box-inner");
     expect(background).toContain(".product-basic-info");
     expect(background).toContain("input[type='file'][accept*='image']");
+    expect(background).toContain("no_image_data_url");
+    expect(background).toContain("no_image_file_input");
+    expect(background).toContain("attemptedInputs");
+    expect(background).toContain("window.__livesellerLastShopeeImageUpload");
+    expect(background).toContain("promotionImageAttempted");
+    expect(background).toContain("targetUploads");
+    expect(background).toContain("product_image_upload_in_progress");
+    expect(background).toContain("product_image_already_present");
+    expect(background).toContain("count: uploadEvidence.uploadedVisible ? 1 : 0");
+    expect(background).toContain("requireCompletedTile");
+    expect(background).toContain("doorstep delivery");
+    expect(background).toContain("shopee supported logistics");
+    expect(background).toContain("brooches & pins");
+    expect(background).toContain("category_confirm_not_found");
+    expect(background).toContain("category_leaf_not_selected");
     expect(background).toContain("clickShopeeProductSection");
     expect(background).toContain("productCreationTabId");
     expect(background).toContain("productAutomationInFlight");
+    expect(background).toContain("liveCommentMonitorPrimedTabs");
+    expect(background).toContain("initial_comment_snapshot");
+    expect(background).toContain("autoReplyDedupeKey");
     expect(background).toContain("product_creation_already_running");
     expect(background).toContain("resetToNewProduct: true");
     expect(background).toContain("resetToNewProduct: false");

@@ -30,83 +30,198 @@ body {
 
 .overlay-shell {
   position: relative;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
   width: 100%;
-  min-height: 100%;
-  padding: clamp(16px, 3vw, 32px);
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.38), rgba(15, 23, 42, 0.08) 42%),
-    var(--liveseller-overlay-background, linear-gradient(135deg, rgba(20, 184, 166, 0.2), rgba(248, 113, 113, 0.1)));
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
 }
 
 .overlay-shell-transparent {
   background: transparent;
 }
 
-.runtime-status {
+.overlay-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  contain: layout paint style;
+  background: #050505;
+}
+
+.overlay-bg-layer,
+.overlay-camera-plane,
+.overlay-slot,
+.caption-band {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  display: inline-grid;
-  grid-auto-flow: column;
+  inset: 0;
+}
+
+.overlay-bg-layer {
+  z-index: 0;
+  overflow: hidden;
+}
+
+.overlay-bg-preset {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+
+.overlay-bg-default .overlay-bg-preset-default,
+.overlay-bg-solid .overlay-bg-preset-default {
+  display: block;
+}
+
+.overlay-bg-kinetic .overlay-bg-preset-kinetic {
+  display: block;
+}
+
+.overlay-bg-off .overlay-bg-layer {
+  display: none;
+}
+
+.overlay-bg-gradient {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 42%, rgba(238, 77, 45, 0.58), transparent 54%),
+    radial-gradient(circle at 72% 58%, rgba(20, 184, 166, 0.5), transparent 52%),
+    linear-gradient(135deg, var(--liveseller-overlay-background, #2d1b69), #11998e);
+  animation: overlay-hue 14s ease-in-out infinite alternate;
+}
+
+.overlay-bg-sale-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-8deg);
+  color: rgba(255, 214, 10, 0.34);
+  font-size: clamp(4rem, 12vw, 10rem);
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 0.9;
+  white-space: nowrap;
+  text-shadow: 0 0 30px rgba(255, 214, 10, 0.28);
+  pointer-events: none;
+}
+
+.overlay-bg-preset-kinetic {
+  background: #070707;
+}
+
+.overlay-kinetic-row {
+  position: absolute;
+  left: 0;
+  white-space: nowrap;
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: 0;
+  will-change: transform;
+}
+
+.overlay-kinetic-row-top {
+  top: 8%;
+  color: #ffd60a;
+  font-size: clamp(3.6rem, 9vw, 10rem);
+  text-shadow: 0 0 24px rgba(255, 214, 10, 0.42);
+  animation: overlay-marquee 18s linear infinite;
+}
+
+.overlay-kinetic-row-mid {
+  top: 36%;
+  color: transparent;
+  font-size: clamp(5.4rem, 14vw, 15rem);
+  -webkit-text-stroke: 2px #ff5a2c;
+  animation: overlay-marquee-reverse 24s linear infinite;
+}
+
+.overlay-kinetic-row-bottom {
+  top: 76%;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: clamp(2.4rem, 6vw, 7rem);
+  animation: overlay-marquee 26s linear infinite;
+}
+
+.overlay-camera-plane {
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.1), transparent 35%, rgba(0, 0, 0, 0.18)),
+    radial-gradient(circle at 50% 110%, rgba(0, 0, 0, 0.38), transparent 45%);
+  pointer-events: none;
+}
+
+.overlay-camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.overlay-camera-plane[data-camera-state="live"] .overlay-camera-video {
+  opacity: 1;
+}
+
+.overlay-camera-plane[data-camera-state="live"] {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.overlay-slot {
+  z-index: 2;
+  pointer-events: none;
+}
+
+.overlay-panel {
+  position: absolute;
+  display: grid;
   align-items: center;
-  gap: 7px;
-  max-width: min(260px, calc(100% - 24px));
-  padding: 7px 10px;
-  border: 1px solid rgba(248, 250, 252, 0.22);
-  border-radius: 6px;
-  background: rgba(2, 6, 23, 0.58);
-  color: #f8fafc;
-  font-size: 0.75rem;
-  font-weight: 800;
-  line-height: 1;
-  text-transform: uppercase;
-  backdrop-filter: blur(8px);
-}
-
-.runtime-status span {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #94a3b8;
-}
-
-.runtime-status-live span {
-  background: #22c55e;
-}
-
-.runtime-status-connecting span {
-  background: #f59e0b;
-}
-
-.runtime-status-error span {
-  background: #fb7185;
-}
-
-.top-band {
-  display: grid;
-  grid-template-columns: minmax(260px, 420px) minmax(220px, 360px);
-  align-items: start;
-  justify-content: space-between;
   gap: 16px;
-}
-
-.product-card,
-.promo-banner {
-  border: 1px solid rgba(248, 250, 252, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.78);
-  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.22);
-  backdrop-filter: blur(10px);
+  background: rgba(20, 20, 20, 0.88);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.48);
+  color: #ffffff;
+  backdrop-filter: blur(8px);
+  animation: overlay-enter 180ms ease-out both;
 }
 
-.product-card {
-  display: grid;
+.overlay-panel-lower-third {
+  left: 5%;
+  right: auto;
+  bottom: 8%;
   grid-template-columns: 96px minmax(0, 1fr);
-  gap: 14px;
-  min-height: 120px;
-  padding: 12px;
+  width: min(640px, 90%);
+  min-height: 124px;
+  padding: 14px 18px;
+}
+
+.overlay-has-captions .overlay-panel-lower-third {
+  bottom: 20%;
+}
+
+.overlay-panel-promo {
+  top: 5%;
+  left: 5%;
+  right: 5%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 94px;
+  padding: 14px 18px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #ff5a2c 0%, #ee4d2d 48%, #ff8a4d 100%);
+  border-color: transparent;
+}
+
+.overlay-panel-promo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.22) 50%, transparent 70%);
+  transform: translateX(-100%);
+  animation: overlay-shimmer 2.4s ease-in-out infinite;
+  pointer-events: none;
 }
 
 .product-image {
@@ -117,109 +232,171 @@ body {
   background: #1e293b;
 }
 
-.product-copy {
+.overlay-panel-copy {
   min-width: 0;
 }
 
-.product-label,
-.product-meta,
-.promo-source {
+.overlay-panel-copy p,
+.overlay-panel-copy span {
   margin: 0;
-  color: #bae6fd;
-  font-size: 0.78rem;
-  font-weight: 700;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.2;
   text-transform: uppercase;
 }
 
-.product-copy h1 {
-  margin: 8px 0;
+.overlay-panel-copy h1,
+.overlay-panel-copy h2 {
+  margin: 4px 0;
   overflow-wrap: anywhere;
   color: #ffffff;
-  font-size: clamp(1.35rem, 2.2vw, 2rem);
-  line-height: 1.05;
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  font-weight: 900;
+  line-height: 1.04;
 }
 
-.product-meta {
-  color: #fef3c7;
-  font-size: 0.95rem;
-}
-
-.promo-banner {
-  display: grid;
-  gap: 8px;
-  min-height: 120px;
-  padding: 14px;
-}
-
-.promo-banner strong {
-  overflow-wrap: anywhere;
-  color: #ffffff;
-  font-size: clamp(1.05rem, 1.7vw, 1.4rem);
+.overlay-panel-copy h2 {
+  font-size: clamp(1.45rem, 3.4vw, 2.4rem);
 }
 
 .countdown {
+  position: relative;
+  z-index: 1;
   width: max-content;
   min-width: 82px;
-  padding: 6px 10px;
+  justify-self: end;
+  padding: 8px 12px;
   border-radius: 6px;
-  background: #f97316;
-  color: #111827;
+  background: #111827;
+  color: #ffffff;
+  font-size: 1.1rem;
   font-variant-numeric: tabular-nums;
-  font-weight: 800;
+  font-weight: 900;
 }
 
 .caption-band {
-  align-self: end;
+  top: auto;
+  bottom: 2.5%;
+  left: 5%;
+  right: 5%;
+  z-index: 3;
   display: grid;
-  gap: 10px;
-  width: min(100%, 960px);
-  margin: 0 auto;
+  gap: 8px;
+  pointer-events: none;
 }
 
 .source-caption,
 .translated-caption {
   margin: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow-wrap: anywhere;
   text-align: center;
   text-wrap: balance;
-  box-shadow: 0 14px 40px rgba(2, 6, 23, 0.22);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.32);
+  animation: overlay-caption-enter 140ms ease-out both;
 }
 
 .source-caption {
-  padding: 12px 18px;
-  background: rgba(2, 6, 23, 0.78);
-  font-size: clamp(1.45rem, 3.4vw, 3rem);
-  font-weight: 800;
+  justify-self: center;
+  max-width: min(960px, 100%);
+  padding: 10px 18px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #ffffff;
+  font-size: clamp(1.45rem, 4vw, 3rem);
+  font-weight: 900;
   line-height: 1.15;
 }
 
 .translation-row {
   display: grid;
   gap: 8px;
+  justify-items: center;
 }
 
 .translated-caption {
+  max-width: min(900px, 100%);
   padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.92);
   color: #111827;
   font-size: clamp(1rem, 2.1vw, 1.5rem);
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1.2;
 }
 
+@keyframes overlay-hue {
+  to {
+    filter: hue-rotate(80deg);
+  }
+}
+
+@keyframes overlay-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes overlay-marquee-reverse {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes overlay-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes overlay-caption-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes overlay-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
 @media (max-width: 720px) {
-  .overlay-shell {
-    padding: 12px;
-  }
-
-  .top-band {
-    grid-template-columns: 1fr;
-  }
-
-  .product-card {
+  .overlay-panel-lower-third {
+    left: 4%;
+    right: 4%;
+    bottom: 9%;
+    width: auto;
     grid-template-columns: 72px minmax(0, 1fr);
     min-height: 96px;
+    padding: 10px;
+  }
+
+  .overlay-panel-promo {
+    left: 4%;
+    right: 4%;
+    min-height: 84px;
+    padding: 10px 12px;
+  }
+
+  .overlay-panel-copy h1,
+  .overlay-panel-copy h2 {
+    font-size: 1.25rem;
   }
 
   .product-image {
