@@ -11,6 +11,9 @@ const rtmpKey = process.env.SHOPEE_RTMP_KEY;
 const durationSeconds = Number.parseInt(process.env.LIVESELLER_STREAM_SECONDS ?? "60", 10);
 const cameraInputKind = process.env.LIVESELLER_CAMERA_INPUT_KIND ?? "lavfi";
 const cameraInput = process.env.LIVESELLER_CAMERA_INPUT ?? "testsrc2=size=1280x720:rate=30";
+const outputWidth = Number.parseInt(process.env.LIVESELLER_STREAM_WIDTH ?? "720", 10);
+const outputHeight = Number.parseInt(process.env.LIVESELLER_STREAM_HEIGHT ?? "1280", 10);
+const outputOrientation = process.env.LIVESELLER_STREAM_ORIENTATION ?? "vertical";
 
 if (!rtmpUrl || !rtmpKey) {
   throw new Error(
@@ -44,7 +47,7 @@ function cameraArgs() {
 async function captureOverlay() {
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    const page = await browser.newPage({ viewport: { width: outputWidth, height: outputHeight } });
     await page.goto(overlayUrl, { waitUntil: "networkidle" });
     await page.screenshot({ path: screenshotPath, omitBackground: false });
   } finally {
@@ -77,7 +80,7 @@ async function main() {
     "-i",
     "anullsrc=channel_layout=stereo:sample_rate=44100",
     "-filter_complex",
-    "[0:v]scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720[cam];[1:v]scale=1280:720[ovr];[cam][ovr]overlay=0:0:format=auto,format=yuv420p[v]",
+    `[0:v]scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=increase,crop=${outputWidth}:${outputHeight}[cam];[1:v]scale=${outputWidth}:${outputHeight}[ovr];[cam][ovr]overlay=0:0:format=auto,format=yuv420p[v]`,
     "-map",
     "[v]",
     "-map",
@@ -120,6 +123,8 @@ async function main() {
     overlayUrl,
     cameraInputKind,
     cameraInput: cameraInputKind === "avfoundation" ? "present_redacted" : cameraInput,
+    outputOrientation,
+    outputSize: `${outputWidth}x${outputHeight}`,
     rtmpUrl: "present_redacted",
     rtmpKey: "present_redacted",
     durationSeconds

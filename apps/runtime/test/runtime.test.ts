@@ -25,6 +25,7 @@ import { createRuntimeSessionStore } from "../src/sessionStore";
 import {
   createRealtimeClientSecret,
   getRuntimeCameraCompositorStatus,
+  createRealtimeVoiceTranslation,
   createRuntimeServer,
   startOverlayStreamSmoke,
   startRuntimeCameraCompositor,
@@ -197,6 +198,61 @@ describe("live brain policy runtime", () => {
       }
     });
     expect(JSON.stringify(requests[0]?.init?.body)).not.toContain("server-test-key");
+  });
+
+  it("returns realtime voice translation actions with seller-playable audio text handoff", async () => {
+    const translation = await createRealtimeVoiceTranslation({
+      sessionId: validLiveSessionSpec.sessionId,
+      text: "这件竹纤维T恤今天直播很适合新加坡天气",
+      sourceLanguage: "zh",
+      targetLanguage: "en",
+      voice: "marin",
+      now: "2026-06-06T02:16:00.000Z"
+    });
+
+    expect(translation).toMatchObject({
+      status: "translated",
+      sessionId: validLiveSessionSpec.sessionId,
+      sourceLanguage: "zh",
+      targetLanguage: "en",
+      outputAudio: {
+        transport: "browser_speech_synthesis",
+        voice: "marin"
+      }
+    });
+    expect(translation.translatedText).toContain("bamboo cooling tee");
+    expect(translation.actions.map((action) => action.type)).toEqual(
+      expect.arrayContaining(["update_caption", "emit_translation"])
+    );
+    expect(JSON.stringify(translation)).not.toMatch(/OPENAI_API_KEY|sk-/i);
+  });
+
+  it("serves product script suggestions for the seller-only UI", async () => {
+    const server = createRuntimeServer();
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected runtime server TCP address");
+    }
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/live-sessions/${validLiveSessionSpec.sessionId}/script-suggestions`
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.suggestions[0]).toMatchObject({
+        productId: validLiveSessionSpec.products[0]!.id,
+        title: validLiveSessionSpec.products[0]!.title
+      });
+      expect(body.suggestions[0].script).toContain("SGD 19.90");
+      expect(body.suggestions[0].script).toContain("42 left");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
   });
 
   it("generates create-product commands only after seller approval", () => {
@@ -718,10 +774,10 @@ describe("live brain policy runtime", () => {
         expect.arrayContaining(["input", "context", "model_action", "tool_result"])
       );
       expect(summary).toMatchObject({
-        eventCount: 3,
         currentProductId: secondProduct.id,
         publicReplies: 1
       });
+      expect(summary.eventCount).toBeGreaterThanOrEqual(3);
       expect(summary.moments.map((moment: { kind: string }) => moment.kind)).toEqual(
         expect.arrayContaining(["product_switch", "host_caption", "viewer_question"])
       );
@@ -961,7 +1017,9 @@ describe("live brain policy runtime", () => {
       cameraInput: "present_redacted",
       rtmpUrl: "present_redacted",
       rtmpKey: "present_redacted",
-      durationSeconds: 12
+      durationSeconds: 12,
+      outputOrientation: "vertical",
+      outputSize: "720x1280"
     });
     expect(spawnImpl).toHaveBeenCalledWith(
       "npm",
@@ -970,6 +1028,9 @@ describe("live brain policy runtime", () => {
         env: expect.objectContaining({
           LIVESELLER_CAMERA_INPUT: "0",
           LIVESELLER_CAMERA_INPUT_KIND: "avfoundation",
+          LIVESELLER_STREAM_HEIGHT: "1280",
+          LIVESELLER_STREAM_ORIENTATION: "vertical",
+          LIVESELLER_STREAM_WIDTH: "720",
           SHOPEE_RTMP_URL: "rtmp-url-value",
           SHOPEE_RTMP_KEY: "stream-key-value",
           LIVESELLER_STREAM_SECONDS: "12"

@@ -532,6 +532,50 @@ async function requestRealtimeSession() {
   }
 }
 
+async function translateAndSpeak() {
+  const response = await fetchJson("/api/runtime/realtime/translate", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId: liveSessionId(),
+      text: $("#host-caption").value.trim(),
+      sourceLanguage: $("#host-language").value,
+      targetLanguage: "en",
+      voice: "marin"
+    })
+  });
+  if (globalThis.speechSynthesis && response.outputAudio?.text) {
+    globalThis.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(response.outputAudio.text);
+    utterance.lang = "en";
+    globalThis.speechSynthesis.speak(utterance);
+  }
+  writeLog("#realtime-log", {
+    status: "translated_audio_handoff_ready",
+    translatedText: response.translatedText,
+    outputAudio: response.outputAudio,
+    actionTypes: (response.actions || []).map((action) => action.type)
+  });
+}
+
+async function loadProductScripts() {
+  const response = await fetchJson(`/api/live-sessions/${encodeURIComponent(liveSessionId())}/script-suggestions`);
+  const root = $("#script-suggestion-log");
+  root.replaceChildren();
+  for (const suggestion of response.suggestions || []) {
+    const card = document.createElement("article");
+    card.className = "suggestion-card";
+    card.innerHTML = `
+      <span class="tag">${escapeHtml(suggestion.facts?.price || "")}</span>
+      <strong>${escapeHtml(suggestion.title)}</strong>
+      <p>${escapeHtml(suggestion.script)}</p>
+    `;
+    root.append(card);
+  }
+  if (!response.suggestions?.length) {
+    root.textContent = "No script suggestions returned.";
+  }
+}
+
 function openPublicOverlay() {
   const url = publicOverlayUrl();
   state.overlayOpened = true;
@@ -829,6 +873,8 @@ $("#send-safe-reply").addEventListener("click", () => void sendLowRiskReplyThrou
 $("#queue-shopee-product-creation").addEventListener("click", () => void queueShopeeProductCreation().catch((error) => writeLog("#product-creation-log", error.message)));
 $("#send-host-caption").addEventListener("click", () => void sendHostCaption().catch((error) => writeLog("#realtime-log", error.message)));
 $("#request-realtime-session").addEventListener("click", () => void requestRealtimeSession());
+$("#translate-and-speak").addEventListener("click", () => void translateAndSpeak().catch((error) => writeLog("#realtime-log", error.message)));
+$("#load-product-scripts").addEventListener("click", () => void loadProductScripts().catch((error) => writeLog("#script-suggestion-log", error.message)));
 $("#use-captured-message").addEventListener("click", () => void useCapturedMessage());
 $("#render-codex-events").addEventListener("click", renderCodexEvents);
 

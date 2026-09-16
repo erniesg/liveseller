@@ -1,6 +1,9 @@
 import { createServer } from "node:http";
 import { type ChildProcess, spawn } from "node:child_process";
 import {
+  type LanguageCode,
+  type LiveAction,
+  type LiveSessionSpec,
   OverlayStateSchema,
   ProductReviewDecisionSchema,
   ProductReviewPlanSchema,
@@ -14,6 +17,8 @@ import {
   buildShopeeStartLivestreamCommands,
   recordProductReviewDecision
 } from "./approvals";
+import { translateCaption } from "./policy";
+import { routeRuntimeEvent } from "./runtime";
 import { createRuntimeSessionStore } from "./sessionStore";
 
 const sessionStores = new Map(
@@ -86,6 +91,73 @@ export async function createRealtimeClientSecret(options: {
   };
 }
 
+function requireSessionStore(sessionId: string) {
+  const store = sessionStores.get(sessionId);
+  if (!store) {
+    throw new Error(`Runtime session not found: ${sessionId}`);
+  }
+  return store;
+}
+
+export async function createRealtimeVoiceTranslation(input: {
+  sessionId: string;
+  text: string;
+  sourceLanguage: LanguageCode;
+  targetLanguage?: LanguageCode;
+  voice?: string;
+  now?: string;
+}): Promise<RealtimeVoiceTranslationResult> {
+  const timestamp = input.now ?? new Date().toISOString();
+  const targetLanguage = input.targetLanguage ?? "en";
+  const store = requireSessionStore(input.sessionId);
+  const session = store.snapshot().session;
+  const translatedText = targetLanguage === "en"
+    ? translateCaption(input.text, input.sourceLanguage)
+    : input.text;
+  const routed = routeRuntimeEvent({
+    eventId: `voice-translation-${Date.parse(timestamp)}`,
+    sessionId: input.sessionId,
+    timestamp,
+    source: "host",
+    type: "host_transcript",
+    payload: {
+      text: input.text,
+      language: input.sourceLanguage,
+      confidence: 0.96
+    }
+  }, session);
+
+  return {
+    status: "translated",
+    sessionId: input.sessionId,
+    sourceLanguage: input.sourceLanguage,
+    targetLanguage,
+    sourceText: input.text,
+    translatedText,
+    actions: routed.actions,
+    outputAudio: {
+      transport: "browser_speech_synthesis",
+      voice: input.voice ?? "marin",
+      text: translatedText
+    }
+  };
+}
+
+export function buildProductScriptSuggestions(session: LiveSessionSpec): ProductScriptSuggestion[] {
+  return session.products.map((product) => ({
+    productId: product.id,
+    title: product.title,
+    script:
+      `Show ${product.title}. Mention ${product.currency} ${product.price.toFixed(2)}, ${product.stock} left, SKU ${product.sku}. ` +
+      "Keep claims tied to the structured listing and invite viewers to ask about size, stock, and shipping.",
+    facts: {
+      price: `${product.currency} ${product.price.toFixed(2)}`,
+      stock: `${product.stock} left`,
+      sku: product.sku
+    }
+  }));
+}
+
 async function readJson(req: import("node:http").IncomingMessage) {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -111,6 +183,34 @@ export type RuntimeCompositorResult = {
   rtmpUrl: "present_redacted";
   rtmpKey: "present_redacted";
   durationSeconds: number;
+  outputOrientation: "vertical";
+  outputSize: "720x1280";
+};
+
+export type RealtimeVoiceTranslationResult = {
+  status: "translated";
+  sessionId: string;
+  sourceLanguage: LanguageCode;
+  targetLanguage: LanguageCode;
+  sourceText: string;
+  translatedText: string;
+  actions: LiveAction[];
+  outputAudio: {
+    transport: "browser_speech_synthesis";
+    voice: string;
+    text: string;
+  };
+};
+
+export type ProductScriptSuggestion = {
+  productId: string;
+  title: string;
+  script: string;
+  facts: {
+    price: string;
+    stock: string;
+    sku: string;
+  };
 };
 
 export type RuntimeCompositorStatus = {
@@ -122,6 +222,8 @@ export type RuntimeCompositorStatus = {
   rtmpUrl?: "present_redacted";
   rtmpKey?: "present_redacted";
   durationSeconds?: number;
+  outputOrientation?: "vertical";
+  outputSize?: "720x1280";
   startedAt?: string;
   stoppedAt?: string;
   exitCode?: number | null;
@@ -225,6 +327,8 @@ export async function startRuntimeCameraCompositor(input: {
   const durationSeconds = input.durationSeconds ?? 60;
   const cameraInputKind = input.cameraInputKind ?? "lavfi";
   const cameraInput = input.cameraInput ?? "testsrc2=size=1280x720:rate=30";
+  const outputOrientation = "vertical";
+  const outputSize = "720x1280";
   const streamSignature = `${input.rtmpUrl}\n${input.rtmpKey}`;
   if (activeRuntimeCompositor) {
     throw new Error(
@@ -240,6 +344,9 @@ export async function startRuntimeCameraCompositor(input: {
       LIVESELLER_CAMERA_INPUT: cameraInput,
       LIVESELLER_CAMERA_INPUT_KIND: cameraInputKind,
       LIVESELLER_OVERLAY_URL: input.overlayUrl,
+      LIVESELLER_STREAM_HEIGHT: "1280",
+      LIVESELLER_STREAM_ORIENTATION: outputOrientation,
+      LIVESELLER_STREAM_WIDTH: "720",
       LIVESELLER_STREAM_SECONDS: String(durationSeconds),
       SHOPEE_RTMP_URL: input.rtmpUrl,
       SHOPEE_RTMP_KEY: input.rtmpKey
@@ -262,6 +369,8 @@ export async function startRuntimeCameraCompositor(input: {
     rtmpUrl: "present_redacted",
     rtmpKey: "present_redacted",
     durationSeconds,
+    outputOrientation,
+    outputSize,
     startedAt: new Date().toISOString()
   };
   activeRuntimeCompositor = {
@@ -318,7 +427,9 @@ export async function startRuntimeCameraCompositor(input: {
     cameraInput: redactCameraInput(cameraInputKind, cameraInput),
     rtmpUrl: "present_redacted",
     rtmpKey: "present_redacted",
-    durationSeconds
+    durationSeconds,
+    outputOrientation,
+    outputSize
   };
 }
 
@@ -452,6 +563,20 @@ export function createRuntimeServer() {
         return;
       }
 
+      const scriptSessionId = sessionIdFromUrl(req.url, /^\/api\/live-sessions\/([^/]+)\/script-suggestions$/u);
+      if (req.method === "GET" && scriptSessionId) {
+        const store = sessionStores.get(scriptSessionId);
+        if (!store) {
+          sendJson(res, 404, { error: "session_not_found" });
+          return;
+        }
+        sendJson(res, 200, {
+          sessionId: scriptSessionId,
+          suggestions: buildProductScriptSuggestions(store.snapshot().session)
+        });
+        return;
+      }
+
       if (req.method === "POST" && req.url === "/api/runtime/events") {
         const event = RuntimeEventSchema.parse(await readJson(req));
         const store = sessionStores.get(event.sessionId);
@@ -467,6 +592,19 @@ export function createRuntimeServer() {
       if (req.method === "POST" && req.url === "/api/runtime/realtime/session") {
         const session = await createRealtimeClientSecret();
         sendJson(res, session.status, session.body);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/runtime/realtime/translate") {
+        const body = await readJson(req);
+        const result = await createRealtimeVoiceTranslation({
+          sessionId: String(body.sessionId ?? ""),
+          text: String(body.text ?? ""),
+          sourceLanguage: (body.sourceLanguage ?? "zh") as LanguageCode,
+          targetLanguage: (body.targetLanguage ?? "en") as LanguageCode,
+          voice: typeof body.voice === "string" ? body.voice : undefined
+        });
+        sendJson(res, 200, result);
         return;
       }
 

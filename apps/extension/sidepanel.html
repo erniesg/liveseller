@@ -211,8 +211,22 @@
             <option value="ta">Tamil</option>
           </select>
         </label>
-        <button id="send-host-caption" type="button">Send caption to overlay</button>
+        <div class="button-row">
+          <button id="send-host-caption" type="button">Send caption to overlay</button>
+          <button id="translate-and-speak" type="button">Translate and speak</button>
+        </div>
         <div id="realtime-log" class="log">Realtime session not requested.</div>
+      </section>
+
+      <section class="panel" aria-label="Product script suggestion">
+        <div class="section-heading">
+          <div>
+            <h2>Product script suggestion</h2>
+            <p>Seller-only talk tracks built from structured product facts.</p>
+          </div>
+          <button id="load-product-scripts" type="button">Load scripts</button>
+        </div>
+        <div id="script-suggestion-log" class="stack">No script loaded.</div>
       </section>
 
       <section id="liveseller-codex-operator" class="panel" aria-label="Codex operator events" aria-live="polite">
