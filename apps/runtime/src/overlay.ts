@@ -16,7 +16,6 @@ function firstProduct(session: LiveSessionSpec): ProductRecord {
 
 export function createInitialOverlayState(session: LiveSessionSpec): OverlayState {
   const product = firstProduct(session);
-  const promo = session.promos[0];
 
   return OverlayStateSchema.parse({
     sessionId: session.sessionId,
@@ -24,7 +23,7 @@ export function createInitialOverlayState(session: LiveSessionSpec): OverlayStat
     caption: {
       text: "",
       language: session.targetLanguages[0],
-      visible: true
+      visible: false
     },
     translatedCaptions: [],
     productCard: {
@@ -33,20 +32,17 @@ export function createInitialOverlayState(session: LiveSessionSpec): OverlayStat
       price: product.price,
       currency: product.currency,
       stock: product.stock,
-      imageUri: product.media.images[0]?.uri ?? "/assets/products/placeholder.jpg"
+      imageUri: product.media.images[0]?.uri ?? "/assets/products/placeholder.jpg",
+      visible: false
     },
-    promoBanner: promo
-      ? {
-          promoId: promo.id,
-          title: promo.title,
-          remainingQuantity: promo.remainingQuantity,
-          endsAt: promo.endAt,
-          backing: promo.source === "shopee" ? "shopee" : "overlay_only"
-        }
-      : undefined,
     audioMix: {
       sourceVolume: 1,
       translatedVolume: 0.75
+    },
+    background: {
+      mode: "off",
+      value: "off",
+      label: "Camera only"
     },
     layoutWarnings: [],
     updatedAt: new Date().toISOString()
@@ -93,7 +89,8 @@ export function applyOverlayActions(
           price: product.price,
           currency: product.currency,
           stock: product.stock,
-          imageUri: product.media.images[0]?.uri ?? "/assets/products/placeholder.jpg"
+          imageUri: product.media.images[0]?.uri ?? "/assets/products/placeholder.jpg",
+          visible: true
         };
       }
     }

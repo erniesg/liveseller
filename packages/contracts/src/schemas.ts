@@ -46,6 +46,15 @@ export const ProductVariantSchema = z
   })
   .strict();
 
+export const ProductListingDraftSchema = z
+  .object({
+    title: z.string().min(1),
+    description: z.string().min(1),
+    bulletPoints: z.array(z.string().min(1))
+  })
+  .strict();
+export type ProductListingDraft = z.infer<typeof ProductListingDraftSchema>;
+
 export const ProductRecordSchema = z
   .object({
     id: z.string().min(1),
@@ -99,13 +108,7 @@ export const ProductRecordSchema = z
       .strict(),
     evidence: z.array(EvidenceCitationSchema),
     sourceConfidence: z.number().min(0).max(1),
-    listingDraft: z
-      .object({
-        title: z.string().min(1),
-        description: z.string().min(1),
-        bulletPoints: z.array(z.string().min(1))
-      })
-      .strict()
+    listingDraft: ProductListingDraftSchema
   })
   .strict();
 export type ProductRecord = z.infer<typeof ProductRecordSchema>;
@@ -163,6 +166,472 @@ export const PolicyPackSchema = z
   .strict();
 export type PolicyPack = z.infer<typeof PolicyPackSchema>;
 
+export const SellerGuidanceSchema = z
+  .object({
+    productId: z.string().min(1),
+    talkTrack: z.string().min(1),
+    researchNotes: z.array(z.string().min(1)),
+    likelyBuyerQuestions: z.array(z.string().min(1)),
+    riskNotes: z.array(z.string().min(1))
+  })
+  .strict();
+export type SellerGuidance = z.infer<typeof SellerGuidanceSchema>;
+
+export const ImageGenerationPlanSchema = z
+  .object({
+    productId: z.string().min(1),
+    model: z.literal("gpt-image-2"),
+    sourceImageUris: z.array(z.string().min(1)),
+    prompts: z.array(z.string().min(1))
+  })
+  .strict();
+export type ImageGenerationPlan = z.infer<typeof ImageGenerationPlanSchema>;
+
+export const ProductIdentityDraftSchema = z
+  .object({
+    productId: z.string().min(1),
+    title: z.string().min(1),
+    sku: z.string().min(1),
+    aliases: z.array(z.string().min(1)),
+    category: z.string().min(1),
+    price: z.number().nonnegative(),
+    currency: CurrencySchema,
+    stock: z.number().int().nonnegative(),
+    variantCount: z.number().int().nonnegative(),
+    imageCount: z.number().int().nonnegative(),
+    sourceConfidence: z.number().min(0).max(1),
+    identitySource: z.enum(["structured_fixture", "seller_upload", "manual"]),
+    missingFields: z.array(z.string().min(1)),
+    evidence: z.array(EvidenceCitationSchema)
+  })
+  .strict();
+export type ProductIdentityDraft = z.infer<typeof ProductIdentityDraftSchema>;
+
+export const SellerUiPolicySchema = z
+  .object({
+    sessionId: z.string().min(1),
+    status: z.enum(["seller_review_required", "ready_for_live_review"]),
+    products: z.array(
+      z
+        .object({
+          productId: z.string().min(1),
+          title: z.string().min(1),
+          sku: z.string().min(1),
+          priceLabel: z.string().min(1),
+          stockLabel: z.string().min(1),
+          imageCount: z.number().int().nonnegative(),
+          missingFields: z.array(z.string().min(1)),
+          reviewRequired: z.boolean()
+        })
+        .strict()
+    ),
+    photoEnhancement: z.array(
+      z
+        .object({
+          productId: z.string().min(1),
+          model: z.literal("gpt-image-2"),
+          sourceImageCount: z.number().int().nonnegative(),
+          promptCount: z.number().int().nonnegative(),
+          requiresApproval: z.boolean()
+        })
+        .strict()
+    ),
+    publicAutomation: z
+      .object({
+        autoSend: z.literal("low_risk_structured_only"),
+        approvalRequired: z.array(z.string().min(1)),
+        blockedAutoSend: z.array(z.string().min(1))
+      })
+      .strict(),
+    renderHints: z
+      .object({
+        sidePanelSectionId: z.literal("liveseller-prep-review"),
+        productAttribute: z.literal("data-liveseller-product-id"),
+        actionAttribute: z.literal("data-liveseller-action-id")
+      })
+      .strict()
+  })
+  .strict();
+export type SellerUiPolicy = z.infer<typeof SellerUiPolicySchema>;
+
+export const AiUpdatableReviewFieldSchema = z.enum([
+  "title",
+  "aliases",
+  "category",
+  "description",
+  "listingDraft",
+  "sellerGuidance",
+  "photoEnhancementPrompts"
+]);
+export type AiUpdatableReviewField = z.infer<typeof AiUpdatableReviewFieldSchema>;
+
+export const LockedStructuredReviewFieldSchema = z.enum([
+  "sku",
+  "price",
+  "stock",
+  "variants",
+  "shopeeProductId",
+  "promoEligibility"
+]);
+export type LockedStructuredReviewField = z.infer<typeof LockedStructuredReviewFieldSchema>;
+
+export const ReviewOptionSchema = z
+  .object({
+    optionId: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string().min(1),
+    intent: z.enum(["approve_as_is", "request_edit", "request_more_options", "reject"])
+  })
+  .strict();
+export type ReviewOption = z.infer<typeof ReviewOptionSchema>;
+
+export const SellerFreeFormReviewResponseSchema = z
+  .object({
+    responseId: z.string().min(1),
+    roundId: z.string().min(1),
+    productId: z.string().min(1),
+    text: z.string().min(1),
+    receivedAt: z.string().datetime(),
+    selectedOptionId: z.string().min(1).optional(),
+    interpretedIntent: z.enum(["approve", "reject", "edit_request", "more_options", "unknown"]),
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict();
+export type SellerFreeFormReviewResponse = z.infer<typeof SellerFreeFormReviewResponseSchema>;
+
+export const SellerReviewRoundSchema = z
+  .object({
+    roundId: z.string().min(1),
+    productId: z.string().min(1),
+    proposedAt: z.string().datetime(),
+    prompt: z.string().min(1),
+    options: z.array(ReviewOptionSchema).min(2),
+    freeFormResponseMode: z.literal("enabled"),
+    response: SellerFreeFormReviewResponseSchema.optional()
+  })
+  .strict()
+  .superRefine((round, ctx) => {
+    if (round.response?.productId && round.response.productId !== round.productId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["response", "productId"],
+        message: "Review response productId must match review round productId"
+      });
+    }
+    if (round.response?.roundId && round.response.roundId !== round.roundId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["response", "roundId"],
+        message: "Review response roundId must match review round roundId"
+      });
+    }
+    if (
+      round.response?.selectedOptionId &&
+      !round.options.some((option) => option.optionId === round.response?.selectedOptionId)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["response", "selectedOptionId"],
+        message: "Selected option must exist in the review round options"
+      });
+    }
+  });
+export type SellerReviewRound = z.infer<typeof SellerReviewRoundSchema>;
+
+export const PrepGenerationTaskSchema = z
+  .object({
+    taskId: z.string().min(1),
+    productId: z.string().min(1),
+    taskType: z.enum(["identity_draft", "seller_guidance", "photo_prompt", "image_edit"]),
+    status: z.enum(["pending", "running", "completed", "failed"]),
+    inputRefs: z.array(z.string().min(1)),
+    outputRefs: z.array(z.string().min(1)),
+    dependsOnTaskIds: z.array(z.string().min(1)),
+    startedAt: z.string().datetime().optional(),
+    completedAt: z.string().datetime().optional(),
+    error: z.string().min(1).optional(),
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict()
+  .superRefine((task, ctx) => {
+    if (task.status === "completed" && task.outputRefs.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["outputRefs"],
+        message: "Completed prep generation tasks must include outputRefs"
+      });
+    }
+    if (task.status === "failed" && !task.error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["error"],
+        message: "Failed prep generation tasks must include error"
+      });
+    }
+  });
+export type PrepGenerationTask = z.infer<typeof PrepGenerationTaskSchema>;
+
+const SellerGuidancePatchSchema = SellerGuidanceSchema.omit({ productId: true }).partial().strict();
+
+export const AiDraftUpdateSchema = z
+  .object({
+    updateId: z.string().min(1),
+    productId: z.string().min(1),
+    actor: z.literal("ai"),
+    updatedAt: z.string().datetime(),
+    reason: z.string().min(1),
+    patch: z
+      .object({
+        title: z.string().min(1).optional(),
+        aliases: z.array(z.string().min(1)).optional(),
+        category: z.string().min(1).optional(),
+        description: z.string().min(1).optional(),
+        listingDraft: ProductListingDraftSchema.optional(),
+        sellerGuidance: SellerGuidancePatchSchema.optional(),
+        photoEnhancementPrompts: z.array(z.string().min(1)).optional()
+      })
+      .strict()
+      .refine((patch) => Object.keys(patch).length > 0, {
+        message: "AI draft update patch must include at least one draftable field"
+      }),
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict();
+export type AiDraftUpdate = z.infer<typeof AiDraftUpdateSchema>;
+
+export const ProductReviewDecisionSchema = z
+  .object({
+    decisionId: z.string().min(1),
+    productId: z.string().min(1),
+    status: z.enum(["pending", "approved", "rejected", "edited"]),
+    decidedBy: z.enum(["seller"]).optional(),
+    decidedAt: z.string().datetime().optional(),
+    reason: z.string().min(1),
+    editedProduct: ProductRecordSchema.optional(),
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict()
+  .superRefine((decision, ctx) => {
+    if (decision.status === "pending") {
+      if (decision.decidedBy) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["decidedBy"],
+          message: "Pending review decisions must not include decidedBy"
+        });
+      }
+      if (decision.decidedAt) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["decidedAt"],
+          message: "Pending review decisions must not include decidedAt"
+        });
+      }
+      if (decision.editedProduct) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["editedProduct"],
+          message: "Pending review decisions must not include editedProduct"
+        });
+      }
+      return;
+    }
+
+    if (!decision.decidedBy) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["decidedBy"],
+        message: "Final review decisions must include decidedBy"
+      });
+    }
+    if (!decision.decidedAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["decidedAt"],
+        message: "Final review decisions must include decidedAt"
+      });
+    }
+    if (decision.status === "edited" && !decision.editedProduct) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["editedProduct"],
+        message: "Edited review decisions must include editedProduct"
+      });
+    }
+    if (decision.status !== "edited" && decision.editedProduct) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["editedProduct"],
+        message: "Only edited review decisions may include editedProduct"
+      });
+    }
+    if (decision.editedProduct && decision.editedProduct.id !== decision.productId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["editedProduct", "id"],
+        message: "Edited product id must match the review decision productId"
+      });
+    }
+  });
+export type ProductReviewDecision = z.infer<typeof ProductReviewDecisionSchema>;
+
+export const ProductReviewItemSchema = z
+  .object({
+    productId: z.string().min(1),
+    product: ProductRecordSchema,
+    identityDraft: ProductIdentityDraftSchema,
+    sellerGuidance: SellerGuidanceSchema,
+    photoEnhancementPlan: ImageGenerationPlanSchema,
+    aiUpdatableFields: z.array(AiUpdatableReviewFieldSchema).min(1),
+    lockedStructuredFields: z.array(LockedStructuredReviewFieldSchema).min(1),
+    draftUpdates: z.array(AiDraftUpdateSchema),
+    reviewRounds: z.array(SellerReviewRoundSchema).min(1),
+    decision: ProductReviewDecisionSchema
+  })
+  .strict()
+  .superRefine((item, ctx) => {
+    const productScopedFields = [
+      ["product", item.product.id],
+      ["identityDraft", item.identityDraft.productId],
+      ["sellerGuidance", item.sellerGuidance.productId],
+      ["photoEnhancementPlan", item.photoEnhancementPlan.productId],
+      ["decision", item.decision.productId]
+    ] as const;
+
+    for (const [field, productId] of productScopedFields) {
+      if (productId !== item.productId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field, "productId"],
+          message: "Product review item productId fields must match"
+        });
+      }
+    }
+
+    item.draftUpdates.forEach((update, index) => {
+      if (update.productId !== item.productId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["draftUpdates", index, "productId"],
+          message: "AI draft update productId must match the review item"
+        });
+      }
+    });
+
+    item.reviewRounds.forEach((round, index) => {
+      if (round.productId !== item.productId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["reviewRounds", index, "productId"],
+          message: "Review round productId must match the review item"
+        });
+      }
+    });
+  });
+export type ProductReviewItem = z.infer<typeof ProductReviewItemSchema>;
+
+export const ProductReviewPlanSchema = z
+  .object({
+    reviewPlanId: z.string().min(1),
+    sessionId: z.string().min(1),
+    generatedAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    status: z.enum([
+      "seller_review_required",
+      "ready_for_publish",
+      "partially_approved",
+      "rejected"
+    ]),
+    items: z.array(ProductReviewItemSchema).min(1),
+    generationTasks: z.array(PrepGenerationTaskSchema),
+    sellerUiPolicy: SellerUiPolicySchema,
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict()
+  .superRefine((plan, ctx) => {
+    if (plan.sellerUiPolicy.sessionId !== plan.sessionId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sellerUiPolicy", "sessionId"],
+        message: "Seller UI policy sessionId must match review plan sessionId"
+      });
+    }
+
+    const productIds = new Set<string>();
+    plan.items.forEach((item, index) => {
+      if (productIds.has(item.productId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["items", index, "productId"],
+          message: "Product review plan productIds must be unique"
+        });
+      }
+      productIds.add(item.productId);
+    });
+  });
+export type ProductReviewPlan = z.infer<typeof ProductReviewPlanSchema>;
+
+export const ShopeeCreateProductCommandSchema = z
+  .object({
+    commandId: z.string().min(1),
+    sessionId: z.string().min(1),
+    productId: z.string().min(1),
+    kind: z.literal("create_product"),
+    createdAt: z.string().datetime(),
+    approvalDecisionId: z.string().min(1),
+    approvalStatus: z.enum(["approved", "edited"]),
+    payload: z
+      .object({
+        product: ProductRecordSchema
+      })
+      .strict(),
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict()
+  .superRefine((command, ctx) => {
+    if (command.payload.product.id !== command.productId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["payload", "product", "id"],
+        message: "Create-product command payload product id must match productId"
+      });
+    }
+  });
+export type ShopeeCreateProductCommand = z.infer<typeof ShopeeCreateProductCommandSchema>;
+
+export const ShopeeStartLivestreamCommandSchema = z
+  .object({
+    commandId: z.string().min(1),
+    sessionId: z.string().min(1),
+    kind: z.literal("prepare_livestream"),
+    createdAt: z.string().datetime(),
+    approvalId: z.string().min(1),
+    approvalStatus: z.literal("approved"),
+    safetyMode: z.literal("create_session_capture_credentials"),
+    payload: z
+      .object({
+        title: z.string().min(1),
+        productIds: z.array(z.string().min(1)).min(1),
+        publicOverlayUrl: z.string().min(1),
+        shopeeSetupSteps: z.array(
+          z.enum([
+            "open_live_center",
+            "create_live_session",
+            "capture_stream_credentials",
+            "bind_public_overlay_preview"
+          ])
+        ).min(1),
+        streamCredentialHandling: z.literal("transient_capture_redacted_evidence"),
+        credentialEvidence: z.literal("redacted_presence_only"),
+        cameraPreviewRequired: z.boolean(),
+        goLive: z.literal(false)
+      })
+      .strict(),
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict();
+export type ShopeeStartLivestreamCommand = z.infer<typeof ShopeeStartLivestreamCommandSchema>;
+
 export const LiveSessionSpecSchema = z
   .object({
     sessionId: z.string().min(1),
@@ -217,7 +686,8 @@ export const ViewerChatEventSchema = RuntimeEventBaseSchema.extend({
       viewerId: z.string().min(1),
       viewerName: z.string().min(1),
       text: z.string().min(1),
-      language: LanguageCodeSchema.optional()
+      language: LanguageCodeSchema.optional(),
+      productId: z.string().min(1).optional()
     })
     .strict()
 });
@@ -298,6 +768,16 @@ export const ToolResultEventSchema = RuntimeEventBaseSchema.extend({
   payload: ToolResultSchema
 });
 
+export const StreamLifecycleEventSchema = RuntimeEventBaseSchema.extend({
+  type: z.literal("stream_lifecycle"),
+  payload: z
+    .object({
+      status: z.enum(["started", "closed"]),
+      reason: z.string().min(1).optional()
+    })
+    .strict()
+});
+
 export const RuntimeEventSchema = z.discriminatedUnion("type", [
   ViewerChatEventSchema,
   HostTranscriptEventSchema,
@@ -305,9 +785,64 @@ export const RuntimeEventSchema = z.discriminatedUnion("type", [
   ProductSwitchEventSchema,
   PromoUpdateEventSchema,
   MetricUpdateEventSchema,
-  ToolResultEventSchema
+  ToolResultEventSchema,
+  StreamLifecycleEventSchema
 ]);
 export type RuntimeEvent = z.infer<typeof RuntimeEventSchema>;
+
+export const StreamMomentSchema = z
+  .object({
+    momentId: z.string().min(1),
+    sessionId: z.string().min(1),
+    eventId: z.string().min(1),
+    timestamp: z.string().datetime(),
+    kind: z.enum([
+      "viewer_question",
+      "host_caption",
+      "product_switch",
+      "promo_update",
+      "approval_required",
+      "risk_escalation",
+      "performance_signal",
+      "lifecycle"
+    ]),
+    title: z.string().min(1),
+    detail: z.string().min(1),
+    productId: z.string().min(1).optional(),
+    promoId: z.string().min(1).optional(),
+    risk: RiskLevelSchema.optional(),
+    actionIds: z.array(z.string().min(1)),
+    auditIds: z.array(z.string().min(1)),
+    citations: z.array(EvidenceCitationSchema)
+  })
+  .strict();
+export type StreamMoment = z.infer<typeof StreamMomentSchema>;
+
+export const RollingStreamSummarySchema = z
+  .object({
+    summaryId: z.string().min(1),
+    sessionId: z.string().min(1),
+    status: z.enum(["active", "closed"]),
+    checkpointSeq: z.number().int().nonnegative(),
+    updatedAt: z.string().datetime(),
+    eventCount: z.number().int().nonnegative(),
+    auditEventCount: z.number().int().nonnegative(),
+    actionCount: z.number().int().nonnegative(),
+    publicReplies: z.number().int().nonnegative(),
+    drafts: z.number().int().nonnegative(),
+    escalations: z.number().int().nonnegative(),
+    approvalsRequested: z.number().int().nonnegative(),
+    orders: z.number().int().nonnegative(),
+    viewerPeak: z.number().int().nonnegative(),
+    currentProductId: z.string().min(1).optional(),
+    currentPromoId: z.string().min(1).optional(),
+    topQuestions: z.array(z.string().min(1)),
+    moments: z.array(StreamMomentSchema),
+    recommendations: z.array(z.string().min(1)),
+    finalizedAt: z.string().datetime().optional()
+  })
+  .strict();
+export type RollingStreamSummary = z.infer<typeof RollingStreamSummarySchema>;
 
 export const ViewerMemorySchema = z
   .object({
@@ -571,6 +1106,44 @@ export const AuditEventSchema = z
   .strict();
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
+export const SellerTimelineEventSchema = z
+  .object({
+    id: z.string().min(1),
+    timestamp: z.string().datetime(),
+    service: z.enum(["runtime", "operator", "extension", "shopee"]),
+    sessionId: z.string().min(1).optional(),
+    kind: z.enum([
+      "runtime_event",
+      "runtime_action",
+      "realtime",
+      "overlay",
+      "stream",
+      "operator",
+      "shopee_action",
+      "product_creation",
+      "viewer_message",
+      "system"
+    ]),
+    status: z.enum(["info", "success", "warning", "error"]),
+    title: z.string().min(1),
+    detail: z.string().min(1).optional(),
+    subjectId: z.string().min(1).optional(),
+    sourceEventId: z.string().min(1).optional(),
+    tool: z.string().min(1).optional(),
+    approvalState: z.enum(["none", "pending", "approved", "rejected", "blocked"]).optional(),
+    redacted: z.boolean().default(false)
+  })
+  .strict();
+export type SellerTimelineEvent = z.infer<typeof SellerTimelineEventSchema>;
+
+export const SellerTimelineResponseSchema = z
+  .object({
+    events: z.array(SellerTimelineEventSchema),
+    nextCursor: z.number().int().nonnegative()
+  })
+  .strict();
+export type SellerTimelineResponse = z.infer<typeof SellerTimelineResponseSchema>;
+
 export const OverlayStateSchema = z
   .object({
     sessionId: z.string().min(1),
@@ -597,7 +1170,8 @@ export const OverlayStateSchema = z
         price: z.number().nonnegative(),
         currency: CurrencySchema,
         stock: z.number().int().nonnegative(),
-        imageUri: z.string().min(1)
+        imageUri: z.string().min(1),
+        visible: z.boolean().optional()
       })
       .strict()
       .optional(),
@@ -617,6 +1191,14 @@ export const OverlayStateSchema = z
         translatedVolume: z.number().min(0).max(1)
       })
       .strict(),
+    background: z
+      .object({
+        mode: z.enum(["default", "solid", "image", "kinetic", "off"]),
+        value: z.string().min(1),
+        label: z.string().min(1)
+      })
+      .strict()
+      .optional(),
     layoutWarnings: z.array(z.string().min(1)),
     updatedAt: z.string().datetime()
   })

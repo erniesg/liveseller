@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS live_sessions (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS product_review_plans (
+  review_plan_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS approvals (
   approval_id TEXT PRIMARY KEY,
   action_id TEXT NOT NULL,

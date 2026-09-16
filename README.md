@@ -19,6 +19,7 @@ LiveSeller is a hackathon-ready Shopee Live commerce copilot. It turns seller up
 - Planning context lives in `docs/planning-context.md`.
 - Stack decisions live in `docs/tech-stack.md`.
 - Contract guidance lives in `docs/contracts.md`.
+- Codex app-server operator design lives in `docs/codex-app-server-operator.md`.
 - Contribution and PR rules live in `CONTRIBUTING.md`.
 
 ## Commands
@@ -29,9 +30,13 @@ npm test
 npm run typecheck
 npm run build
 npm run demo:prep
+npm run demo:operator
+npm run live:prep:one-image
 npm run demo:runtime
 npm run dev:overlay
 ```
+
+`npm run live:prep:one-image` requires `OPENAI_API_KEY` in a local `.env`. It runs one repo fixture product image through server-side `gpt-image-2` image editing, writes initial/updated/response review plans under ignored `artifacts/prep-live/`, records one free-form seller response with an explicit structured `--seller-intent`, and confirms no create-product command is emitted before approval.
 
 ## Checkpoints
 

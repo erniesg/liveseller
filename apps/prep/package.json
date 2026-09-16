@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "demo": "tsx src/demo.ts",
+    "live:one-image": "tsx src/liveOpenAiPrep.ts",
     "test": "vitest run apps/prep/test"
   },
   "dependencies": {

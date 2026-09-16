@@ -25,7 +25,7 @@ This is the operating plan for the SEAxOpenAI 5-hour build. `main` must stay usa
 | T+0:15 | Kickoff sync | All | Branches created, issues claimed, owner split understood | GitHub issue comments |
 | T+0:45 | Contract freeze confirmed | Ernest | Shared schemas/fixtures stable enough for lane work | `npm test -- packages/contracts/test/contracts.test.ts` |
 | T+1:15 | Fake vertical slice | Ernest + Swara | `RuntimeEvent -> LiveAction -> fake adapter -> AuditEvent -> OverlayState` works | `npm test -- apps/runtime/test/runtime.test.ts` |
-| T+1:45 | Prep seed slice | Ernest | Seed folder produces products, promo, policy, assets, citations, missing-field report, `LiveSessionSpec` | `npm run demo:prep` |
+| T+1:45 | Prep seller-material slice | Ernest | Seller files/docs/folders produce structured identity drafts, products, promo, policy, assets, citations, missing-field report, photo enhancement plans, seller UI policy, and `LiveSessionSpec` | `npm run demo:prep` |
 | T+2:15 | Realtime caption slice | Swara | Server-owned realtime path or local realtime stub emits source captions and translations; no browser-side API key | `npm run demo:runtime` plus issue proof |
 | T+2:45 | Extension mock slice | Jiayi | Content script helper captures viewer rows; command executor drafts without overwriting seller typing | `npm test -- apps/extension/test/extension.test.ts` |
 | T+3:15 | Risk gate checkpoint | Swara + Ernest | refund, fake/counterfeit, legal, fraud, discount cases never auto-send | `npm test -- apps/runtime/test/runtime.test.ts` |
@@ -68,7 +68,7 @@ Done by T+3:15:
 
 Done by T+1:45:
 
-- Contracts, prep seed slice, fake runtime slice, overlay baseline, docs, CI, and issue tracking stay green.
+- Contracts, prep seller-material slice, fake runtime slice, overlay baseline, docs, CI, and issue tracking stay green.
 
 Done by T+4:40:
 

@@ -1,27 +1,44 @@
 import {
   AUDIT_JSONL_CONTRACT,
+  AiDraftUpdateSchema,
   AuditEventSchema,
   ContextEnvelopeSchema,
   LiveActionSchema,
   LiveSessionSpecSchema,
   OverlayStateSchema,
+  PrepGenerationTaskSchema,
+  ProductReviewPlanSchema,
   ProductRecordSchema,
   PromoRecordSchema,
   RuntimeEventSchema,
   SQLITE_SCHEMA,
+  SellerFreeFormReviewResponseSchema,
+  SellerTimelineEventSchema,
   SessionMemorySchema,
+  ShopeeCreateProductCommandSchema,
+  ShopeeStartLivestreamCommandSchema,
   ViewerMemorySchema,
   badFixtures,
+  validAiDraftUpdate,
   validAuditEvent,
   validLiveAction,
   validLiveSessionSpec,
   validOverlayState,
+  validProductReviewPlan,
   validProducts,
   validPromo,
   validRuntimeEvents,
+  validSellerFreeFormReviewResponse,
+  validSellerTimelineEvent,
+  validShopeeCreateProductCommand,
+  validShopeeStartLivestreamCommand,
   validSessionMemory,
-  validViewerMemory
+  validViewerMemory,
+  vintageJewelryLiveSessionSpec,
+  vintageJewelryProducts,
+  vintageJewelrySessionMemory
 } from "@liveseller/contracts";
+import { existsSync } from "node:fs";
 
 describe("contract freeze", () => {
   it("accepts all shared valid fixtures", () => {
@@ -34,12 +51,87 @@ describe("contract freeze", () => {
     expect(() => OverlayStateSchema.parse(validOverlayState)).not.toThrow();
     expect(() => ViewerMemorySchema.parse(validViewerMemory)).not.toThrow();
     expect(() => SessionMemorySchema.parse(validSessionMemory)).not.toThrow();
+    expect(() => ProductReviewPlanSchema.parse(validProductReviewPlan)).not.toThrow();
+    expect(() => AiDraftUpdateSchema.parse(validAiDraftUpdate)).not.toThrow();
+    expect(() => SellerFreeFormReviewResponseSchema.parse(validSellerFreeFormReviewResponse)).not.toThrow();
+    expect(() => SellerTimelineEventSchema.parse(validSellerTimelineEvent)).not.toThrow();
+    expect(() => {
+      validProductReviewPlan.generationTasks.forEach((task) => PrepGenerationTaskSchema.parse(task));
+    }).not.toThrow();
+    expect(() => ShopeeCreateProductCommandSchema.parse(validShopeeCreateProductCommand)).not.toThrow();
+    expect(() => ShopeeStartLivestreamCommandSchema.parse(validShopeeStartLivestreamCommand)).not.toThrow();
   });
 
   it("rejects invalid or private contract payloads", () => {
     expect(() => ProductRecordSchema.parse(badFixtures.negativeStockProduct)).toThrow();
     expect(() => LiveActionSchema.parse(badFixtures.privateLiveActionPayload)).toThrow();
     expect(() => LiveActionSchema.parse(badFixtures.mismatchedActionPayload)).toThrow();
+    expect(() => AiDraftUpdateSchema.parse(badFixtures.aiDraftUpdateChangesLockedPrice)).toThrow();
+    expect(() => ProductReviewPlanSchema.parse(badFixtures.productReviewPlanIdMismatch)).toThrow();
+    expect(() => ProductReviewPlanSchema.parse(badFixtures.editedDecisionWithoutEditedProduct)).toThrow();
+    expect(() => ProductReviewPlanSchema.parse(badFixtures.productReviewPlanWithoutOptions)).toThrow();
+  });
+
+  it("freezes review-to-publish safety contracts", () => {
+    expect(validProductReviewPlan.items[0]?.decision.status).toBe("pending");
+    expect(validProductReviewPlan.items[0]?.aiUpdatableFields).toEqual(
+      expect.arrayContaining(["title", "listingDraft", "sellerGuidance", "photoEnhancementPrompts"])
+    );
+    expect(validProductReviewPlan.items[0]?.lockedStructuredFields).toEqual(
+      expect.arrayContaining(["sku", "price", "stock", "variants", "promoEligibility"])
+    );
+    expect(validProductReviewPlan.items[0]?.reviewRounds[0]).toMatchObject({
+      freeFormResponseMode: "enabled",
+      options: expect.arrayContaining([
+        expect.objectContaining({ intent: "approve_as_is" }),
+        expect.objectContaining({ intent: "request_edit" })
+      ])
+    });
+    expect(validProductReviewPlan.generationTasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: validProducts[0]!.id,
+          taskType: "image_edit",
+          status: "pending"
+        })
+      ])
+    );
+    expect(validShopeeCreateProductCommand).toMatchObject({
+      kind: "create_product",
+      approvalStatus: "approved",
+      productId: validProducts[0]!.id
+    });
+    expect(validShopeeCreateProductCommand.payload.product.price).toBe(validProducts[0]!.price);
+    expect(validShopeeCreateProductCommand.payload.product.stock).toBe(validProducts[0]!.stock);
+  });
+
+  it("keeps livestream setup commands free of RTMP secrets", () => {
+    expect(validShopeeStartLivestreamCommand).toMatchObject({
+      kind: "prepare_livestream",
+      approvalStatus: "approved",
+      safetyMode: "create_session_capture_credentials"
+    });
+    expect(validShopeeStartLivestreamCommand.payload.shopeeSetupSteps).toEqual([
+      "open_live_center",
+      "create_live_session",
+      "capture_stream_credentials",
+      "bind_public_overlay_preview"
+    ]);
+    expect(validShopeeStartLivestreamCommand.payload.streamCredentialHandling).toBe(
+      "transient_capture_redacted_evidence"
+    );
+    expect(validShopeeStartLivestreamCommand.payload.goLive).toBe(false);
+    expect(JSON.stringify(validShopeeStartLivestreamCommand).toLowerCase()).not.toContain("streamkey");
+    expect(JSON.stringify(validShopeeStartLivestreamCommand).toLowerCase()).not.toContain("rtmp://");
+    expect(() =>
+      ShopeeStartLivestreamCommandSchema.parse({
+        ...validShopeeStartLivestreamCommand,
+        payload: {
+          ...validShopeeStartLivestreamCommand.payload,
+          streamKey: "raw-secret-key"
+        }
+      })
+    ).toThrow();
   });
 
   it("validates a context envelope assembled by another lane", () => {
@@ -65,8 +157,35 @@ describe("contract freeze", () => {
 
   it("declares the local storage and immutable audit contracts", () => {
     expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS products");
+    expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS product_review_plans");
     expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS approvals");
     expect(SQLITE_SCHEMA).toContain("CREATE TABLE IF NOT EXISTS commands");
     expect(AUDIT_JSONL_CONTRACT.filePattern).toBe("audit/{sessionId}.jsonl");
+  });
+
+  it("shares the vintage jewelry seller-drop fixtures across lanes", () => {
+    expect(vintageJewelryProducts).toHaveLength(3);
+    expect(() => vintageJewelryProducts.forEach((product) => ProductRecordSchema.parse(product))).not.toThrow();
+    expect(() => LiveSessionSpecSchema.parse(vintageJewelryLiveSessionSpec)).not.toThrow();
+    expect(() => SessionMemorySchema.parse(vintageJewelrySessionMemory)).not.toThrow();
+    expect(vintageJewelryLiveSessionSpec.products.map((product) => product.id)).toEqual(
+      vintageJewelryProducts.map((product) => product.id)
+    );
+    expect(vintageJewelryProducts.every((product) => product.media.images.length > 0)).toBe(true);
+    expect(vintageJewelrySessionMemory.recommendations.some((note) => note.includes("cameo"))).toBe(true);
+  });
+
+  it("keeps shared fixture asset locators portable across machines", () => {
+    const imageLocators = vintageJewelryProducts.flatMap((product) =>
+      product.media.images.flatMap((image) => image.citations.map((citation) => citation.locator))
+    );
+    const publicAssetPaths = vintageJewelryProducts.flatMap((product) =>
+      product.media.images.map((image) => image.uri.replace(/^\//u, "apps/overlay/public/"))
+    );
+
+    expect(imageLocators.every((locator) => locator.startsWith("apps/prep/fixtures/seller-drop/"))).toBe(true);
+    expect(imageLocators.every((locator) => !locator.includes("/Users/"))).toBe(true);
+    expect(imageLocators.every((locator) => existsSync(locator))).toBe(true);
+    expect(publicAssetPaths.every((assetPath) => existsSync(assetPath))).toBe(true);
   });
 });

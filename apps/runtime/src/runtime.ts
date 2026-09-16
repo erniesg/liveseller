@@ -1,8 +1,10 @@
 import {
   type AuditEvent,
+  type ApprovalRequest,
   type ContextEnvelope,
   type LiveAction,
   type LiveSessionSpec,
+  type OverlayState,
   type ProductRecord,
   type RuntimeEvent,
   type SessionMemory,
@@ -25,6 +27,7 @@ import {
 import { applyOverlayActions, createInitialOverlayState } from "./overlay";
 
 const now = () => new Date().toISOString();
+const approvalExpiry = () => new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
 function firstProduct(session: LiveSessionSpec): ProductRecord {
   const product = session.products[0];
@@ -38,6 +41,57 @@ function actionId(event: RuntimeEvent, type: string): string {
   return `${event.eventId}-${type}`;
 }
 
+function productMentionedByText(text: string, session: LiveSessionSpec): ProductRecord | undefined {
+  const normalized = text.toLowerCase();
+  const direct = session.products.find((candidate) => {
+    const aliases = [candidate.title, candidate.sku, ...candidate.aliases];
+    return aliases.some((alias) => normalized.includes(alias.toLowerCase()));
+  });
+  if (direct) {
+    return direct;
+  }
+  const tokens = new Set(
+    normalized
+      .split(/[^a-z0-9\u4e00-\u9fff]+/iu)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3)
+  );
+  if (tokens.size === 0) {
+    return undefined;
+  }
+  const ranked = session.products
+    .map((candidate) => {
+      const productTokens = [candidate.title, candidate.sku, ...candidate.aliases]
+        .join(" ")
+        .toLowerCase()
+        .split(/[^a-z0-9\u4e00-\u9fff]+/iu)
+        .filter((token) => token.length >= 3);
+      const matched = productTokens.filter((token) => tokens.has(token));
+      return { candidate, score: new Set(matched).size };
+    })
+    .filter((match) => match.score >= 2)
+    .sort((left, right) => right.score - left.score);
+  return ranked[0]?.candidate;
+}
+
+function resolveEventProduct(
+  event: RuntimeEvent,
+  session: LiveSessionSpec,
+  currentProductId?: string
+): ProductRecord {
+  if ((event.type === "viewer_chat" || event.type === "product_switch") && event.payload.productId) {
+    const explicitProduct = session.products.find((candidate) => candidate.id === event.payload.productId);
+    if (explicitProduct) {
+      return explicitProduct;
+    }
+  }
+  const text =
+    event.type === "viewer_chat" || event.type === "host_transcript" ? event.payload.text : "";
+  return productMentionedByText(text, session) ??
+    (currentProductId ? session.products.find((candidate) => candidate.id === currentProductId) : undefined) ??
+    resolveProduct(text, session);
+}
+
 export function buildContextEnvelope(
   event: RuntimeEvent,
   session: LiveSessionSpec,
@@ -48,11 +102,7 @@ export function buildContextEnvelope(
     currentPromoId?: string;
   } = {}
 ): ContextEnvelope {
-  const text =
-    event.type === "viewer_chat" || event.type === "host_transcript" ? event.payload.text : "";
-  const product = event.type === "product_switch"
-    ? session.products.find((candidate) => candidate.id === event.payload.productId) ?? firstProduct(session)
-    : resolveProduct(text, session);
+  const product = resolveEventProduct(event, session, memory.currentProductId);
   const promo = session.promos[0];
   const policyDecision = event.type === "viewer_chat" ? classifyViewerMessage(event.payload.text) : undefined;
 
@@ -60,7 +110,7 @@ export function buildContextEnvelope(
     contextId: `ctx-${event.eventId}`,
     event,
     session,
-    currentProductId: memory.currentProductId ?? product.id,
+    currentProductId: product.id,
     currentPromoId: memory.currentPromoId ?? promo?.id,
     viewerMemory: memory.viewerMemory,
     sessionMemory: memory.sessionMemory ?? {
@@ -164,10 +214,14 @@ function decideViewerChatActions(context: ContextEnvelope): LiveAction[] {
   }
 
   const session = context.session;
-  const product = resolveProduct(event.payload.text, session);
+  const product = resolveEventProduct(event, session, context.currentProductId);
   const language = detectLanguage(event.payload.text, event.payload.language);
   const decision = classifyViewerMessage(event.payload.text);
   const citations = findRelevantCitations(product, session);
+
+  if (decision.behavior === "ignore") {
+    return [];
+  }
 
   if (decision.behavior === "send_reply") {
     return [
@@ -248,7 +302,7 @@ function decideViewerChatActions(context: ContextEnvelope): LiveAction[] {
           prompt: "Viewer is negotiating a discount. Confirm whether this is Shopee-backed before posting.",
           proposedPublicText:
             "The current promo is the Live Flash 10% Off deal shown on stream; seller will confirm if extra vouchers apply.",
-          expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+          expiresAt: approvalExpiry()
         }
       })
     ];
@@ -371,6 +425,18 @@ export function createAuditEvents(
     context
   });
 
+  const policyEvents = context.policyFlags.map((policyFlag) =>
+    AuditEventSchema.parse({
+      auditId: `audit-${event.eventId}-policy-${policyFlag.rule}`,
+      sessionId: event.sessionId,
+      timestamp: now(),
+      kind: "policy",
+      actor: "runtime",
+      reason: policyFlag.reason,
+      context
+    })
+  );
+
   const actionEvents = actions.map((action) =>
     AuditEventSchema.parse({
       auditId: `audit-${action.actionId}`,
@@ -382,12 +448,48 @@ export function createAuditEvents(
       action
     })
   );
+  const approvalEvents = actions
+    .filter((action) => action.requiresApproval)
+    .map((action) =>
+      AuditEventSchema.parse({
+        auditId: `audit-${action.approvalId ?? `approval-${action.actionId}`}`,
+        sessionId: event.sessionId,
+        timestamp: now(),
+        kind: "approval",
+        actor: "runtime",
+        reason: action.reason,
+        approval: buildApprovalRequest(action)
+      })
+    );
 
-  return [input, contextEvent, ...actionEvents];
+  return [input, contextEvent, ...policyEvents, ...actionEvents, ...approvalEvents];
 }
 
-export function routeRuntimeEvent(event: RuntimeEvent, session: LiveSessionSpec) {
-  const context = buildContextEnvelope(event, session);
+function buildApprovalRequest(action: LiveAction): ApprovalRequest {
+  return {
+    approvalId: action.approvalId ?? `approval-${action.actionId}`,
+    actionId: action.actionId,
+    sessionId: action.sessionId,
+    status: "pending",
+    originalAction: action,
+    requestedAt: now(),
+    reason: action.reason,
+    expiresAt: action.payload.kind === "request_approval" ? action.payload.expiresAt : approvalExpiry()
+  };
+}
+
+export function routeRuntimeEvent(
+  event: RuntimeEvent,
+  session: LiveSessionSpec,
+  memory: {
+    viewerMemory?: ViewerMemory;
+    sessionMemory?: SessionMemory;
+    currentProductId?: string;
+    currentPromoId?: string;
+    overlayState?: OverlayState;
+  } = {}
+) {
+  const context = buildContextEnvelope(event, session, memory);
   const actions = decideActions(context);
   const toolResults = executeFakeAdapters(actions);
   const auditEvents = [
@@ -404,7 +506,7 @@ export function routeRuntimeEvent(event: RuntimeEvent, session: LiveSessionSpec)
       })
     )
   ];
-  const overlayState = applyOverlayActions(session, actions, createInitialOverlayState(session));
+  const overlayState = applyOverlayActions(session, actions, memory.overlayState ?? createInitialOverlayState(session));
 
   return {
     context,
